@@ -1,0 +1,29 @@
+# use pkg-config for getting CFLAGS and LDLIBS
+FFMPEG_LIBS=    -L../../../install/soc_bm1684_asic/ffmpeg/usr/local/lib/ -lavdevice                        \
+                -lavformat                        \
+                -lavfilter                        \
+                -lavcodec                          \
+                -lswresample                    \
+                -lswscale                          \
+                -lavutil                            \
+                -L../../../install/soc_bm1684_asic/decode/lib/         \
+                -lbmvideo -lbmjpulite -lbmjpuapi -lbmion -lbmvpulite -lbmvpuapi 
+
+CFLAGS += -Wall -g
+# CFLAGS := $(shell pkg-config --cflags $(FFMPEG_LIBS)) $(CFLAGS)
+# LDLIBS := $(shell pkg-config --libs $(FFMPEG_LIBS)) $(LDLIBS)
+LDLIBS := $(FFMPEG_LIBS) -lm -lpthread
+#-I/mnt/hgfs/share/log4c-1.2.4/build/install/include -L/mnt/hgfs/share/log4c-1.2.4/build/install/lib -llog4c
+#EXAMPLES=       demuxing_decoding_bm
+
+#OBJS=$(addsuffix .o,$(EXAMPLES))
+
+.phony: all clean
+
+#all: $(OBJS) $(EXAMPLES)
+all:
+	aarch64-linux-gnu-gcc -o test_bm_restart_g demuxing_decoding_bm_restart.c $(LDLIBS) -I../../
+#-fsanitize=address -fno-omit-frame-pointer -fsanitize-recover=address -lasan
+	aarch64-linux-gnu-strip -o test_bm_restart test_bm_restart_g
+clean: clean-test
+	$(RM) $(EXAMPLES) $(OBJS)

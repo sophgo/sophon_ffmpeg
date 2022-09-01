@@ -1,0 +1,69 @@
+
+# CIF, multiple-level scaling
+bitrate=100
+ffmpeg -hwaccel bmcodec -hwaccel_device 0 \
+    -c:v h264_bm -output_format 101 -i input_1080p.264 \
+    -vf "scale_bm=704:576,scale_bm=352:288" \
+    -c:v h264_bm -enc-params "gop_preset=2:max_qp=44" -g 50 -b:v ${bitrate}K -y output_cif.264
+ffmpeg -hwaccel bmcodec -hwaccel_device 1 \
+    -c:v h264_bm -output_format 101 -i input_1080p.264 \
+    -vf "scale_bm=704:576,scale_bm=352:288,fps=fps=25" \
+    -c:v h264_bm -enc-params "gop_preset=2:max_qp=44" -g 50 -b:v ${bitrate}K -y output_cif.264
+
+# SD
+bitrate=1000
+ffmpeg -hwaccel bmcodec -hwaccel_device 0 \
+    -c:v h264_bm -output_format 101 -i input_1080p.264 \
+    -vf "scale_bm=720:576" \
+    -c:v h264_bm -enc-params "gop_preset=2:max_qp=44" -g 100 -b:v ${bitrate}K -y output_576p.264
+ffmpeg -hwaccel bmcodec -hwaccel_device 1 \
+    -c:v h264_bm -output_format 101 -i input_1080p.264 \
+    -vf "scale_bm=720:576,fps=fps=25" \
+    -c:v h264_bm -enc-params "gop_preset=2:max_qp=44" -g 100 -b:v ${bitrate}K -y output_576p.264
+
+# D1
+ffmpeg -hwaccel bmcodec -hwaccel_device 0 \
+    -c:v h264_bm -output_format 101 -i input_1080p.264 \
+    -vf "scale_bm=704:576" \
+    -c:v h264_bm -enc-params "gop_preset=2:max_qp=44" -g 100 -b:v ${bitrate}K -y output_d1.264
+ffmpeg -hwaccel bmcodec -hwaccel_device 1 \
+    -c:v h264_bm -output_format 101 -i input_1080p.264 \
+    -vf "scale_bm=704:576,fps=fps=25" \
+    -c:v h264_bm -enc-params "gop_preset=2:max_qp=44" -g 100 -b:v ${bitrate}K -y output_d1.264
+
+# 720P
+bitrate=2000
+ffmpeg -hwaccel bmcodec -hwaccel_device 0 \
+    -c:v h264_bm -output_format 101 -i input_1080p.264 \
+    -vf "scale_bm=1280:720" \
+    -c:v h264_bm -enc-params "gop_preset=2:max_qp=44" -g 100 -b:v ${bitrate}K -y output_720p.264
+ffmpeg -hwaccel bmcodec -hwaccel_device 1 \
+    -c:v h264_bm -output_format 101 -i input_1080p.264 \
+    -vf "scale_bm=1280:720,fps=fps=25" \
+    -c:v h264_bm -enc-params "gop_preset=2:max_qp=44" -g 100 -b:v ${bitrate}K -y output_720p.264
+
+# screenshot
+ffmpeg -hwaccel bmcodec -hwaccel_device 0 \
+    -c:v h264_bm -output_format 101 -i input_1080p.264 \
+    -vf "scale_bm=1280:720:format=yuvj420p" \
+    -c:v jpeg_bm -vframes 1 -y output_720p_I420ToJ420.jpeg
+
+
+# bmx264 encoder + 352x198 + 32Kbps
+
+src_video="input_1080p.mp4"
+basename=`basename ${src_video} .mp4`
+outputname=output/${basename}_352x198
+
+device_par="-hwaccel bmcodec -hwaccel_device 0"
+dec_par="-c:v h264_bm -output_format 101 -i ${src_video}"
+vf_par="-vf scale_bm=960:540,scale_bm=704:396,scale_bm=352:198"
+enc_par="-c:v bmx264 -g 50 -b:v 32K -maxrate 64K -bufsize 64K -enc-params force-cfr=1:repeat-headers=1:qpmin=10:qpmax=51:bframes=0:keyint=50:keyint-min=50:rc-lookahead=10:scenecut=0"
+
+export BMCPU_FIPFILE="/data/firmware/fip.bin"
+export BMCPU_RAMBOOTFILE="/data/firmware/ramboot_rootfs.itb"
+#export BMCPU_LOGFILE="output/device_logfile.txt"
+export BMX264_LIBFILE="/data/firmware/libx264.so"
+
+ffmpeg ${device_par} ${dec_par} ${vf_par} ${enc_par} -y ${outputname}.264
+

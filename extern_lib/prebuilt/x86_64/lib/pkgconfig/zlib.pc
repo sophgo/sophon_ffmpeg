@@ -1,0 +1,13 @@
+prefix=../prebuilt
+exec_prefix=${prefix}
+libdir=${exec_prefix}/x86_64/lib
+sharedlibdir=${libdir}
+includedir=${prefix}/include
+
+Name: zlib
+Description: zlib compression library
+Version: 1.2.8
+
+Requires:
+Libs: -L${libdir} -L${sharedlibdir} -lz
+Cflags: -I${includedir}
