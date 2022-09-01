@@ -103,9 +103,11 @@ This project is licensed under the LGPL License, Version 3. Please refere to the
 	- tao.han
 	- yujing.shen
 	- huaishan.yuan
-	- yonggang.zhao 
-	- shulin.shang
-	- mingyi.dong
+    - yuyuan.yang
+    - xin.guo
+    - yu.yang
+    - mingxi.shen
+    - haotian.luo
 	
 ## Contributing
 
