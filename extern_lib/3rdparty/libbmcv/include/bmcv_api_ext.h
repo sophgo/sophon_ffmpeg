@@ -45,7 +45,8 @@ typedef struct {
 #endif
 
 #define MIN_PROPOSAL_NUM (1)
-#define MAX_PROPOSAL_NUM (65535)
+#define MAX_PROPOSAL_NUM (40000) //(65535)
+
 #ifndef WIN32
 typedef struct nms_proposal {
     int          size;
@@ -109,7 +110,9 @@ typedef enum bm_image_data_format_ext_ {
     DATA_TYPE_EXT_1N_BYTE,
     DATA_TYPE_EXT_4N_BYTE,
     DATA_TYPE_EXT_1N_BYTE_SIGNED,
-    DATA_TYPE_EXT_4N_BYTE_SIGNED
+    DATA_TYPE_EXT_4N_BYTE_SIGNED,
+    DATA_TYPE_EXT_FP16,
+    DATA_TYPE_EXT_BF16,
 } bm_image_data_format_ext;
 
 typedef enum bm_image_format_ext_ {
@@ -130,11 +133,24 @@ typedef enum bm_image_format_ext_ {
     FORMAT_GRAY,
     FORMAT_COMPRESSED,
     FORMAT_HSV_PLANAR,
+    FORMAT_ARGB_PACKED,
+    FORMAT_ABGR_PACKED,
+    FORMAT_YUV444_PACKED,
+    FORMAT_YVU444_PACKED,
+    FORMAT_YUV422_YUYV,
+    FORMAT_YUV422_YVYU,
+    FORMAT_YUV422_UYVY,
+    FORMAT_YUV422_VYUY,
+    FORMAT_RGBYP_PLANAR,
+    FORMAT_HSV180_PACKED,
+    FORMAT_HSV256_PACKED,
+    FORMAT_BAYER,
 } bm_image_format_ext;
 
 typedef enum bmcv_resize_algorithm_ {
     BMCV_INTER_NEAREST = 0,
-    BMCV_INTER_LINEAR
+    BMCV_INTER_LINEAR  = 1,
+    BMCV_INTER_BICUBIC = 2
 } bmcv_resize_algorithm;
 
 typedef enum bm_cv_nms_alg_ {
@@ -161,6 +177,15 @@ typedef struct bmcv_rect {
     int crop_w;
     int crop_h;
 } bmcv_rect_t;
+
+#pragma pack(push, 1)
+typedef struct yolov7_info{
+  int scale;
+  int *orig_image_shape;
+  int model_h;
+  int model_w;
+} yolov7_info_t;
+#pragma pack(pop)
 
 typedef struct bmcv_copy_to_atrr_s {
     int           start_x;
@@ -228,11 +253,7 @@ typedef struct {
     int csc_coe21;
     int csc_coe22;
     int csc_add2;
-#ifndef WIN32
-} __attribute__((packed)) csc_matrix_t;
-#else
 } csc_matrix_t;
-#endif
 
 typedef enum csc_type {
     CSC_YCbCr2RGB_BT601 = 0,
@@ -336,7 +357,7 @@ DECL_EXPORT bm_status_t bm_image_copy_device_to_host(bm_image image,
                                                      void *   buffers[]);
 
 DECL_EXPORT bm_status_t bm_image_attach(bm_image image, bm_device_mem_t *device_memory);
-bm_status_t bm_image_detach(bm_image);
+DECL_EXPORT bm_status_t bm_image_detach(bm_image);
 DECL_EXPORT bool        bm_image_is_attached(bm_image);
 DECL_EXPORT int         bm_image_get_plane_num(bm_image);
 DECL_EXPORT bm_status_t bm_image_get_stride(bm_image image, int *stride);
@@ -352,7 +373,7 @@ DECL_EXPORT bm_status_t bm_image_get_device_mem(bm_image image, bm_device_mem_t 
 DECL_EXPORT bm_status_t bm_image_alloc_contiguous_mem(int       image_num,
                                           bm_image *images,
                                           int       heap_id = BMCV_HEAP_ANY);
-bm_status_t bm_image_alloc_contiguous_mem_heap_mask(int       image_num,
+DECL_EXPORT bm_status_t bm_image_alloc_contiguous_mem_heap_mask(int       image_num,
                                                     bm_image *images,
                                                     int       heap_mask);
 DECL_EXPORT bm_status_t bm_image_free_contiguous_mem(int image_num, bm_image *images);
@@ -385,19 +406,16 @@ DECL_EXPORT bm_status_t bmcv_image_storage_convert_with_csctype(bm_handle_t hand
                                                     bm_image *  input,
                                                     bm_image *  output,
                                                     csc_type_t  csc_type);
-
-bm_status_t bmcv_image_copy_to(bm_handle_t         handle,
+DECL_EXPORT bm_status_t bmcv_image_copy_to(bm_handle_t         handle,
                                bmcv_copy_to_atrr_t copy_to_attr,
                                bm_image            input,
                                bm_image            output);
-
-bm_status_t bmcv_image_crop(bm_handle_t         handle,
+DECL_EXPORT bm_status_t bmcv_image_crop(bm_handle_t         handle,
                             int                 crop_num,
                             bmcv_rect_t *       rects,
                             bm_image            input,
                             bm_image *          output);
-
-bm_status_t bmcv_image_split(bm_handle_t         handle,
+DECL_EXPORT bm_status_t bmcv_image_split(bm_handle_t         handle,
                              bm_image            input,
                              bm_image *          output);
 
@@ -472,6 +490,7 @@ typedef struct bmcv_convert_to_attr_s {
  *of matrix_num[n]. If setting to 4N, the output image number should have
  *summary of ROUNDUP(matrix_num[n], 4)/4
  */
+
 DECL_EXPORT bm_status_t bmcv_image_warp_affine(
         bm_handle_t              handle,
         int                      image_num,
@@ -480,7 +499,15 @@ DECL_EXPORT bm_status_t bmcv_image_warp_affine(
         bm_image *               output,
         int                      use_bilinear = 0);
 
-bm_status_t bmcv_image_warp_perspective(
+DECL_EXPORT bm_status_t bmcv_image_warp_affine_similar_to_opencv(
+        bm_handle_t              handle,
+        int                      image_num,
+        bmcv_affine_image_matrix matrix[4],
+        bm_image *               input,
+        bm_image *               output,
+        int                      use_bilinear);
+
+DECL_EXPORT bm_status_t bmcv_image_warp_perspective(
         bm_handle_t                   handle,
         int                           image_num,
         bmcv_perspective_image_matrix matrix[4],
@@ -488,7 +515,7 @@ bm_status_t bmcv_image_warp_perspective(
         bm_image *                    output,
         int                           use_bilinear = 0);
 
-bm_status_t bmcv_image_warp_perspective_with_coordinate(
+DECL_EXPORT bm_status_t bmcv_image_warp_perspective_with_coordinate(
         bm_handle_t                       handle,
         int                               image_num,
         bmcv_perspective_image_coordinate coordinate[4],
@@ -496,12 +523,34 @@ bm_status_t bmcv_image_warp_perspective_with_coordinate(
         bm_image *                        output,
         int                               use_bilinear = 0);
 
+DECL_EXPORT bm_status_t bmcv_image_warp_perspective_similar_to_opencv(
+    bm_handle_t                       handle,
+    int                               image_num,
+    bmcv_perspective_image_matrix     matrix[4],
+    bm_image *                        input,
+    bm_image *                        output,
+    int                               use_bilinear);
+
 DECL_EXPORT bm_status_t bmcv_image_resize(
         bm_handle_t          handle,
         int                  input_num,
         bmcv_resize_image    resize_attr[],
         bm_image *           input,
         bm_image *           output);
+
+DECL_EXPORT bm_status_t bmcv_hamming_distance(bm_handle_t handle,
+                                  bm_device_mem_t input1,
+                                  bm_device_mem_t input2,
+                                  bm_device_mem_t output,
+                                  int bits_len,
+                                  int input1_num,
+                                  int input2_num);
+
+DECL_EXPORT bm_status_t bmcv_image_yuv_resize(
+                              bm_handle_t       handle,
+                              int               input_num,
+                              bm_image *        input,
+                              bm_image *        output);
 
 DECL_EXPORT bm_status_t bmcv_image_convert_to(
         bm_handle_t          handle,
@@ -515,14 +564,13 @@ bm_status_t bmcv_width_align(
         bm_image    input,
         bm_image    output);
 
-bm_status_t bmcv_image_jpeg_enc(
+DECL_EXPORT bm_status_t bmcv_image_jpeg_enc(
         bm_handle_t handle,
         int         image_num,
         bm_image *  src,
         void **     p_jpeg_data,
         size_t *    out_size,
         int         quality_factor = 85);
-
 DECL_EXPORT bm_status_t bmcv_image_jpeg_dec(
         bm_handle_t handle,
         void **     p_jpeg_data,
@@ -530,14 +578,14 @@ DECL_EXPORT bm_status_t bmcv_image_jpeg_dec(
         int         image_num,
         bm_image *  dst);
 
-bm_status_t bmcv_nms(
+DECL_EXPORT bm_status_t bmcv_nms(
         bm_handle_t     handle,
         bm_device_mem_t input_proposal_addr,
         int             proposal_size,
         float           nms_threshold,
         bm_device_mem_t output_proposal_addr);
 
-bm_status_t bmcv_nms_ext(
+DECL_EXPORT bm_status_t bmcv_nms_ext(
         bm_handle_t     handle,
         bm_device_mem_t input_proposal_addr,
         int             proposal_size,
@@ -551,6 +599,46 @@ bm_status_t bmcv_nms_ext(
         float         * densities = NULL,
         float           eta = 0.0f);
 
+#define BMCV_YOLOV3_DETECT_OUT_MAX_NUM 200
+DECL_EXPORT bm_status_t bmcv_nms_yolov3(bm_handle_t      handle,
+        //input
+        int              input_num,
+        bm_device_mem_t  bottom[3],
+        int              batch_num,
+        int              hw[3][2],
+        int              num_classes,
+        int              num_boxes,
+        int              mask_group_size,
+        float            nms_threshold,
+        float            confidence_threshold,
+        int              keep_top_k,
+        float            bias[18],
+        float            anchor_scale[3],
+        float            mask[9],
+        bm_device_mem_t  output,
+        int              yolov5_flag = 0,
+        int              len_per_batch = 0);
+
+DECL_EXPORT bm_status_t bmcv_nms_yolo(
+        bm_handle_t handle,
+        int input_num,
+        bm_device_mem_t bottom[3],
+        int batch_num,
+        int hw_shape[3][2],
+        int num_classes,
+        int num_boxes,
+        int mask_group_size,
+        float nms_threshold,
+        float confidence_threshold,
+        int keep_top_k,
+        float bias[18],
+        float anchor_scale[3],
+        float mask[9],
+        bm_device_mem_t output,
+        int yolov5_flag,
+        int len_per_batch,
+        void *ext);
+
 DECL_EXPORT bm_status_t bmcv_image_draw_rectangle(
         bm_handle_t   handle,
         bm_image      image,
@@ -561,7 +649,7 @@ DECL_EXPORT bm_status_t bmcv_image_draw_rectangle(
         unsigned char g,
         unsigned char b);
 
-bm_status_t bmcv_image_fill_rectangle(
+DECL_EXPORT bm_status_t bmcv_image_fill_rectangle(
         bm_handle_t   handle,
         bm_image      image,
         int           rect_num,
@@ -581,6 +669,7 @@ DECL_EXPORT bm_status_t bmcv_sort(
         int             order,
         bool            index_enable,
         bool            auto_index);
+
 /**
  * @brief: calculate topk for each db, return BM_SUCCESS if succeed.
  * @param handle           [in]: the device handle.
@@ -594,13 +683,14 @@ DECL_EXPORT bm_status_t bmcv_sort(
  *        else
  *          buffer_size = ceil(max(per_per_batch_cnt)/4000000) * 3*sizeof(float)*(k>10000? 2*k : 10000)
  * @param src_index_valid  [in]: if true, use src_index, otherwise gen index auto.
- * @param k                [in]: k value 
+ * @param k                [in]: k value
  * @param batch            [in]: batch numeber
  * @param per_batch_cnt    [in]: data_number of per_batch
  * @param src_batch_stride [in]: distance between two batches
  * @param descending       [in]: descending or ascending.
  */
-bm_status_t bmcv_batch_topk(
+
+DECL_EXPORT bm_status_t bmcv_batch_topk(
         bm_handle_t     handle,
         bm_device_mem_t src_data_addr,
         bm_device_mem_t src_index_addr,
@@ -638,21 +728,266 @@ DECL_EXPORT bm_status_t bmcv_feature_match(
         int             sort_cnt   = 1,
         int             rshiftbits = 0);
 
-bm_status_t bmcv_base64_enc(
+DECL_EXPORT bm_status_t bmcv_base64_enc(
         bm_handle_t     handle,
         bm_device_mem_t src,
         bm_device_mem_t dst,
         unsigned long   len[2]);
 
-bm_status_t bmcv_base64_dec(
+DECL_EXPORT bm_status_t bmcv_base64_dec(
         bm_handle_t     handle,
         bm_device_mem_t src,
         bm_device_mem_t dst,
         unsigned long   len[2]);
 
-bm_status_t bmcv_debug_savedata(bm_image image, const char *name);
+/**
+ * @brief: calculate inner product distance between query vectors and database vectors, output the top K IP-values and the corresponding indices, return BM_SUCCESS if succeed.
+ * @param handle                               [in]: the device handle.
+ * @param input_data_global_addr               [in]: device addr information of the query matrix.
+ * @param db_data_global_addr                  [in]: device addr information of the database matrix.
+ * @param buffer_global_addr                   [in]: inner product values stored in the buffer.
+ * @param output_sorted_similarity_global_addr [out]: the IP-values matrix.
+ * @param output_sorted_index_global_addr      [out]: the result indices matrix.
+ * @param vec_dims          [in]: vector dimension.
+ * @param query_vecs_num    [in]: the num of query vectors.
+ * @param database_vecs_num [in]: the num of database vectors.
+ * @param sort_cnt          [in]: get top sort_cnt values.
+ * @param is_transpose      [in]: db_matrix 0: NO_TRNAS; 1: TRANS.
+ * @param input_dtype       [in]: DT_FP32 / DT_INT8.
+ * @param output_dtype      [in]: DT_FP32 / DT_INT32.
+ */
+DECL_EXPORT bm_status_t bmcv_faiss_indexflatIP(
+        bm_handle_t     handle,
+        bm_device_mem_t input_data_global_addr,
+        bm_device_mem_t db_data_global_addr,
+        bm_device_mem_t buffer_global_addr,
+        bm_device_mem_t output_sorted_similarity_global_addr,
+        bm_device_mem_t output_sorted_index_global_addr,
+        int             vec_dims,
+        int             query_vecs_num,
+        int             database_vecs_num,
+        int             sort_cnt,
+        int             is_transpose,
+        int             input_dtype,
+        int             output_dtype);
+/**
+ * @brief: calculate squared L2 distance between query vectors and database vectors, output the top K L2sqr-values and the corresponding indices, return BM_SUCCESS if succeed.
+ * @param handle                               [in]: the device handle.
+ * @param input_data_global_addr               [in]: device addr information of the query matrix.
+ * @param db_data_global_addr                  [in]: device addr information of the database matrix.
+ * @param query_L2norm_global_addr             [in]: device addr information of the query norm_L2sqr vector.
+ * @param db_L2norm_global_addr                [in]: device addr information of the database norm_L2sqr vector.
+ * @param buffer_global_addr                   [in]: squared L2 values stored in the buffer.
+ * @param output_sorted_similarity_global_addr [out]: the L2sqr-values matrix.
+ * @param output_sorted_index_global_addr      [out]: the result indices matrix.
+ * @param vec_dims          [in]: vector dimension.
+ * @param query_vecs_num    [in]: the num of query vectors.
+ * @param database_vecs_num [in]: the num of database vectors.
+ * @param sort_cnt          [in]: get top sort_cnt values.
+ * @param is_transpose      [in]: db_matrix 0: NO_TRNAS; 1: TRANS.
+ * @param input_dtype       [in]: DT_FP32.
+ * @param output_dtype      [in]: DT_FP32.
+ */
+DECL_EXPORT bm_status_t bmcv_faiss_indexflatL2(
+        bm_handle_t     handle,
+        bm_device_mem_t input_data_global_addr,
+        bm_device_mem_t db_data_global_addr,
+        bm_device_mem_t query_L2norm_global_addr,
+        bm_device_mem_t db_L2norm_global_addr,
+        bm_device_mem_t buffer_global_addr,
+        bm_device_mem_t output_sorted_similarity_global_addr,
+        bm_device_mem_t output_sorted_index_global_addr,
+        int             vec_dims,
+        int             query_vecs_num,
+        int             database_vecs_num,
+        int             sort_cnt,
+        int             is_transpose,
+        int             input_dtype,
+        int             output_dtype);
 
-bm_status_t bmcv_image_transpose(bm_handle_t handle,
+/**
+ * @brief: PQ Asymmetric Distance Computation, output the topK distance and label of x and q(ny), return BM_SUCCESS if succeed.
+ * @param handle                         [in]: the device handle.
+ * @param centroids_input_dev            [in]: device addr information of the centroids.
+ * @param nxquery_input_dev              [in]: device addr information of the query.
+ * @param nycodes_input_dev,             [in]: PQcodes of database.
+ * @param distance_output_dev            [out]: output topK distance
+ * @param index_output_dev               [out]: output topK label
+ * @param vec_dims              [in]: vector dimension.
+ * @param slice_num             [in]: the num of sliced vector.
+ * @param centroids_num         [in]: the num of centroids num.
+ * @param database_num          [in]: the num of database vectors.
+ * @param query_num             [in]: the num of query vectors.
+ * @param sort_cnt              [in]: get top sort_cnt values.
+ * @param IP_metric             [in]: metrics 0:L2_matric; 1:IP_matric.
+ */
+DECL_EXPORT bm_status_t bmcv_faiss_indexPQ_ADC(
+        bm_handle_t     handle,
+        bm_device_mem_t centroids_input_dev,
+        bm_device_mem_t nxquery_input_dev,
+        bm_device_mem_t nycodes_input_dev,
+        bm_device_mem_t distance_output_dev,
+        bm_device_mem_t index_output_dev,
+        int             vec_dims,
+        int             slice_num,
+        int             centroids_num,
+        int             database_num,
+        int             query_num,
+        int             sort_cnt,
+        int             IP_metric);
+
+/**
+ * @brief: PQ Asymmetric Distance Computation, output the topK distance and label of x and q(ny), return BM_SUCCESS if succeed.
+ * @param handle                         [in]: the device handle.
+ * @param centroids_input_dev            [in]: device addr information of the centroids.
+ * @param nxquery_input_dev              [in]: device addr information of the query.
+ * @param nycodes_input_dev,             [in]: PQcodes of database.
+ * @param distance_output_dev            [out]: output topK distance
+ * @param index_output_dev               [out]: output topK label
+ * @param vec_dims              [in]: vector dimension.
+ * @param slice_num             [in]: the num of sliced vector.
+ * @param centroids_num         [in]: the num of centroids num.
+ * @param database_num          [in]: the num of database vectors.
+ * @param query_num             [in]: the num of query vectors.
+ * @param sort_cnt              [in]: get top sort_cnt values.
+ * @param IP_metric             [in]: metrics 0:L2_matric; 1:IP_matric.
+ * @param in_dtype              [in]: input data type, support DT_FP32/DTfp16.
+ * @param out_dtype             [in]: output data type, support DT_FP32/DTfp16.
+ */
+DECL_EXPORT bm_status_t bmcv_faiss_indexPQ_ADC_ext(
+        bm_handle_t     handle,
+        bm_device_mem_t centroids_input_dev,
+        bm_device_mem_t nxquery_input_dev,
+        bm_device_mem_t nycodes_input_dev,
+        bm_device_mem_t distance_output_dev,
+        bm_device_mem_t index_output_dev,
+        int             vec_dims,
+        int             slice_num,
+        int             centroids_num,
+        int             database_num,
+        int             query_num,
+        int             sort_cnt,
+        int             IP_metric,
+        int             in_dtype,
+        int             out_dtype);
+
+/**
+ * @brief: PQ Symmetric Distance Computation, output the topK distance and label of q(x) and q(ny), return BM_SUCCESS if succeed.
+ * @param handle                         [in]: the device handle.
+ * @param sdc_table_input_dev            [in]: device addr information of the sdc_table.
+ * @param nxcodes_input_dev,             [in]: PQcodes of query.
+ * @param nycodes_input_dev,             [in]: PQcodes of database.
+ * @param distance_output_dev            [out]: output topK distance.
+ * @param index_output_dev               [out]: output topK label.
+ * @param slice_num             [in]: the num of sliced vector.
+ * @param centroids_num         [in]: the num of centroids num.
+ * @param database_num          [in]: the num of database vectors.
+ * @param query_num             [in]: the num of query vectors.
+ * @param sort_cnt              [in]: get top sort_cnt values.
+ * @param IP_metric             [in]: metrics 0:L2_matric; 1:IP_matric.
+ */
+DECL_EXPORT bm_status_t bmcv_faiss_indexPQ_SDC(
+        bm_handle_t     handle,
+        bm_device_mem_t sdc_table_input_dev,
+        bm_device_mem_t nxcodes_input_dev,
+        bm_device_mem_t nycodes_input_dev,
+        bm_device_mem_t distance_output_dev,
+        bm_device_mem_t index_output_dev,
+        int             slice_num,
+        int             centroids_num,
+        int             database_num,
+        int             query_num,
+        int             sort_cnt,
+        int             IP_metric);
+
+/**
+ * @brief: PQ Symmetric Distance Computation, output the topK distance and label of q(x) and q(ny), return BM_SUCCESS if succeed.
+ * @param handle                         [in]: the device handle.
+ * @param sdc_table_input_dev            [in]: device addr information of the sdc_table.
+ * @param nxcodes_input_dev,             [in]: PQcodes of query.
+ * @param nycodes_input_dev,             [in]: PQcodes of database.
+ * @param distance_output_dev            [out]: output topK distance.
+ * @param index_output_dev               [out]: output topK label.
+ * @param slice_num             [in]: the num of sliced vector.
+ * @param centroids_num         [in]: the num of centroids num.
+ * @param database_num          [in]: the num of database vectors.
+ * @param query_num             [in]: the num of query vectors.
+ * @param sort_cnt              [in]: get top sort_cnt values.
+ * @param IP_metric             [in]: metrics 0:L2_matric; 1:IP_matric.
+ * @param in_dtype              [in]: input data type, support DT_FP32/DTfp16.
+ * @param out_dtype             [in]: output data type, support DT_FP32/DTfp16.
+ */
+DECL_EXPORT bm_status_t bmcv_faiss_indexPQ_SDC_ext(
+        bm_handle_t     handle,
+        bm_device_mem_t sdc_table_input_dev,
+        bm_device_mem_t nxcodes_input_dev,
+        bm_device_mem_t nycodes_input_dev,
+        bm_device_mem_t distance_output_dev,
+        bm_device_mem_t index_output_dev,
+        int             slice_num,
+        int             centroids_num,
+        int             database_num,
+        int             query_num,
+        int             sort_cnt,
+        int             IP_metric,
+        int             in_dtype,
+        int             out_dtype);
+
+/**
+ * @brief: encode D-dims vectors into m*int8 PQcodes , return BM_SUCCESS if succeed.
+ * @param handle                         [in]: the device handle.
+ * @param vector_input_dev               [in]: device addr information of the D-dims vectors
+ * @param centroids_input_dev            [in]: device addr information of the centroids.
+ * @param buffer_table_dev,              [in]: distance table stored in the buffer,size=nv*m*ksub*dtype.
+ * @param codes_output_dev               [out]: output PQcodes, size = nv * m * int8.
+ * @param encode_vecs_num   [in]: the num of input vectors.
+ * @param vec_dims          [in]: vector dimension.
+ * @param slice_num         [in]: the num of sliced vector.
+ * @param centroids_num     [in]: the num of centroids.
+ */
+DECL_EXPORT bm_status_t bmcv_faiss_indexPQ_encode(
+        bm_handle_t     handle,
+        bm_device_mem_t vector_input_dev,
+        bm_device_mem_t centroids_input_dev,
+        bm_device_mem_t buffer_table_dev,
+        bm_device_mem_t codes_output_dev,
+        int             encode_vec_num,
+        int             vec_dims,
+        int             slice_num,
+        int             centroids_num,
+        int             IP_metric);
+
+/**
+ * @brief: encode D-dims vectors into m*int8 PQcodes , return BM_SUCCESS if succeed.
+ * @param handle                         [in]: the device handle.
+ * @param vector_input_dev               [in]: device addr information of the D-dims vectors
+ * @param centroids_input_dev            [in]: device addr information of the centroids.
+ * @param buffer_table_dev,              [in]: distance table stored in the buffer,size=nv*m*ksub*dtype.
+ * @param codes_output_dev               [out]: output PQcodes, size = nv * m * int8.
+ * @param encode_vecs_num   [in]: the num of input vectors.
+ * @param vec_dims          [in]: vector dimension.
+ * @param slice_num         [in]: the num of sliced vector.
+ * @param centroids_num     [in]: the num of centroids.
+ * @param in_dtype              [in]: input data type, support DT_FP32/DTfp16.
+ * @param out_dtype             [in]: output data type, support DT_FP32/DTfp16.
+ */
+DECL_EXPORT bm_status_t bmcv_faiss_indexPQ_encode_ext(
+        bm_handle_t     handle,
+        bm_device_mem_t vector_input_dev,
+        bm_device_mem_t centroids_input_dev,
+        bm_device_mem_t buffer_table_dev,
+        bm_device_mem_t codes_output_dev,
+        int             encode_vec_num,
+        int             vec_dims,
+        int             slice_num,
+        int             centroids_num,
+        int             IP_metric,
+        int             input_dtype,
+        int             output_dtype);
+
+DECL_EXPORT bm_status_t bmcv_debug_savedata(bm_image image, const char *name);
+
+DECL_EXPORT bm_status_t bmcv_image_transpose(bm_handle_t handle,
                                  bm_image input,
                                  bm_image output);
 
@@ -672,6 +1007,33 @@ DECL_EXPORT bm_status_t bmcv_matmul(
         float            alpha = 1,
         float            beta = 0);
 
+DECL_EXPORT bm_status_t bmcv_matmul_transpose_opt(
+        bm_handle_t      handle,
+        int              M,
+        int              N,
+        int              K,
+        bm_device_mem_t  A,
+        bm_device_mem_t  B,
+        bm_device_mem_t  C,
+        int              A_sign,  // 1: signed 0: unsigned
+        int              B_sign);
+
+DECL_EXPORT bm_status_t bmcv_gemm_ext(
+        bm_handle_t      handle,
+        bool                is_A_trans,
+        bool                is_B_trans,
+        int                 M,
+        int                 N,
+        int                 K,
+        float               alpha,
+        bm_device_mem_t     A,
+        bm_device_mem_t     B,
+        float               beta,
+        bm_device_mem_t     C,
+        bm_device_mem_t     Y,
+        bm_image_data_format_ext in_dtype,
+        bm_image_data_format_ext out_dtype);
+
 DECL_EXPORT bm_status_t bmcv_image_sobel(
         bm_handle_t handle,
         bm_image input,
@@ -682,7 +1044,36 @@ DECL_EXPORT bm_status_t bmcv_image_sobel(
         float scale = 1,
         float delta = 0);
 
-bm_status_t bmcv_calc_hist(bm_handle_t handle,
+DECL_EXPORT bm_status_t  bmcv_image_laplacian(
+        bm_handle_t handle,
+        bm_image input,
+        bm_image output,
+        unsigned int ksize);
+
+DECL_EXPORT bm_status_t  bmcv_image_axpy(
+        bm_handle_t handle,
+        bm_device_mem_t tensor_A,
+        bm_device_mem_t tensor_X,
+        bm_device_mem_t tensor_Y,
+        bm_device_mem_t tensor_F,
+        int input_n,
+        int input_c,
+        int input_h,
+        int input_w);
+
+DECL_EXPORT bm_status_t bmcv_image_fusion(
+        bm_handle_t handle,
+        bm_image input1,
+        bm_image input2,
+        bm_image output,
+        unsigned char thresh,
+        unsigned char max_value,
+        bm_thresh_type_t type,
+        int kw,
+        int kh,
+        bm_device_mem_t kmem);
+
+DECL_EXPORT bm_status_t bmcv_calc_hist(bm_handle_t handle,
                            bm_device_mem_t input,
                            bm_device_mem_t output,
                            int C,
@@ -694,7 +1085,7 @@ bm_status_t bmcv_calc_hist(bm_handle_t handle,
                            const float *ranges,
                            int inputDtype);
 
-bm_status_t bmcv_calc_hist_with_weight(bm_handle_t handle,
+DECL_EXPORT bm_status_t bmcv_calc_hist_with_weight(bm_handle_t handle,
                                        bm_device_mem_t input,
                                        bm_device_mem_t output,
                                        const float *weight,
@@ -707,49 +1098,54 @@ bm_status_t bmcv_calc_hist_with_weight(bm_handle_t handle,
                                        const float *ranges,
                                        int inputDtype);
 
-bm_status_t bmcv_distance(bm_handle_t handle,
+DECL_EXPORT bm_status_t bmcv_distance(bm_handle_t handle,
                           bm_device_mem_t input,
                           bm_device_mem_t output,
                           int dim,
                           const float *pnt,
                           int len);
 
-bm_status_t bmcv_fft_1d_create_plan(bm_handle_t handle,
+DECL_EXPORT bm_status_t bmcv_distance_ext(bm_handle_t handle,
+                          bm_device_mem_t input,
+                          bm_device_mem_t output,
+                          int dim,
+                          const void * pnt,
+                          int len,
+			  int dtyte);
+
+DECL_EXPORT bm_status_t bmcv_fft_1d_create_plan(bm_handle_t handle,
                                     int batch,
                                     int len,
                                     bool forward,
                                     void *&plan);
-
-bm_status_t bmcv_fft_2d_create_plan(bm_handle_t handle,
+DECL_EXPORT bm_status_t bmcv_fft_2d_create_plan(bm_handle_t handle,
                                     int M,
                                     int N,
                                     bool forward,
                                     void *&plan);
-
-bm_status_t bmcv_fft_execute(bm_handle_t handle,
+DECL_EXPORT bm_status_t bmcv_fft_execute(bm_handle_t handle,
                              bm_device_mem_t inputReal,
                              bm_device_mem_t inputImag,
                              bm_device_mem_t outputReal,
                              bm_device_mem_t outputImag,
                              const void *plan);
-
-bm_status_t bmcv_fft_execute_real_input(
+DECL_EXPORT bm_status_t bmcv_fft_execute_real_input(
                              bm_handle_t handle,
                              bm_device_mem_t inputReal,
                              bm_device_mem_t outputReal,
                              bm_device_mem_t outputImag,
                              const void *plan);
 
-void bmcv_fft_destroy_plan(bm_handle_t handle, void *plan);
+DECL_EXPORT void bmcv_fft_destroy_plan(bm_handle_t handle, void *plan);
 
 // mode = 0 for min only, 1 for max only, 2 for both
-bm_status_t bmcv_min_max(bm_handle_t handle,
+DECL_EXPORT bm_status_t bmcv_min_max(bm_handle_t handle,
                          bm_device_mem_t input,
                          float *minVal,
                          float *maxVal,
                          int len);
 
-bm_status_t bmcv_cmulp(bm_handle_t handle,
+DECL_EXPORT bm_status_t bmcv_cmulp(bm_handle_t handle,
                        bm_device_mem_t inputReal,
                        bm_device_mem_t inputImag,
                        bm_device_mem_t pointReal,
@@ -759,7 +1155,7 @@ bm_status_t bmcv_cmulp(bm_handle_t handle,
                        int batch,
                        int len);
 
-bm_status_t bmcv_image_add_weighted(
+DECL_EXPORT bm_status_t bmcv_image_add_weighted(
         bm_handle_t handle,
         bm_image input1,
         float alpha,
@@ -768,13 +1164,37 @@ bm_status_t bmcv_image_add_weighted(
         float gamma,
         bm_image output);
 
+DECL_EXPORT bm_status_t bmcv_image_bitwise_and(
+        bm_handle_t handle,
+        bm_image input1,
+        bm_image input2,
+        bm_image output);
+
+DECL_EXPORT bm_status_t bmcv_image_bitwise_or(
+        bm_handle_t handle,
+        bm_image input1,
+        bm_image input2,
+        bm_image output);
+
+DECL_EXPORT bm_status_t bmcv_image_bitwise_xor(
+        bm_handle_t handle,
+        bm_image input1,
+        bm_image input2,
+        bm_image output);
+
 DECL_EXPORT bm_status_t bmcv_image_absdiff(
         bm_handle_t handle,
         bm_image input1,
         bm_image input2,
         bm_image output);
 
-bm_status_t bmcv_image_threshold(
+DECL_EXPORT bm_status_t bmcv_image_bayer2rgb(
+        bm_handle_t handle,
+        unsigned char* convd_kernel,
+        bm_image input,
+        bm_image output);
+
+DECL_EXPORT bm_status_t bmcv_image_threshold(
         bm_handle_t handle,
         bm_image input,
         bm_image output,
@@ -791,7 +1211,7 @@ DECL_EXPORT bm_status_t bmcv_image_gaussian_blur(
         float sigmaX,
         float sigmaY = 0);
 
-bm_status_t bmcv_image_canny(
+DECL_EXPORT bm_status_t bmcv_image_canny(
         bm_handle_t handle,
         bm_image input,
         bm_image output,
@@ -800,7 +1220,7 @@ bm_status_t bmcv_image_canny(
         int aperture_size = 3,
         bool l2gradient = false);
 
-bm_status_t bmcv_image_draw_lines(
+DECL_EXPORT bm_status_t bmcv_image_draw_lines(
         bm_handle_t handle,
         bm_image img,
         const bmcv_point_t* start,
@@ -809,7 +1229,7 @@ bm_status_t bmcv_image_draw_lines(
         bmcv_color_t color,
         int thickness);
 
-bm_status_t bmcv_image_put_text(
+DECL_EXPORT bm_status_t bmcv_image_put_text(
         bm_handle_t handle,
         bm_image image,
         const char* text,
@@ -834,7 +1254,7 @@ DECL_EXPORT bm_status_t bmcv_image_erode(
         bm_device_mem_t kmem
         );
 
-bm_status_t bmcv_image_dilate(
+DECL_EXPORT bm_status_t bmcv_image_dilate(
         bm_handle_t handle,
         bm_image src,
         bm_image dst,
@@ -848,7 +1268,7 @@ bm_status_t bmcv_image_pyramid_down(
         bm_image input,
         bm_image output);
 
-bm_status_t bmcv_image_lkpyramid_create_plan(
+DECL_EXPORT bm_status_t bmcv_image_lkpyramid_create_plan(
         bm_handle_t handle,
         void*& plan,
         int width,
@@ -857,7 +1277,7 @@ bm_status_t bmcv_image_lkpyramid_create_plan(
         int winH = 21,
         int maxLevel = 3);
 
-bm_status_t bmcv_image_lkpyramid_execute(
+DECL_EXPORT bm_status_t bmcv_image_lkpyramid_execute(
         bm_handle_t handle,
         void* plan,
         bm_image prevImg,
@@ -868,7 +1288,7 @@ bm_status_t bmcv_image_lkpyramid_execute(
         bool* status,
         bmcv_term_criteria_t criteria = {3, 30, 0.01});
 
-void bmcv_image_lkpyramid_destroy_plan(
+DECL_EXPORT void bmcv_image_lkpyramid_destroy_plan(
         bm_handle_t handle,
         void* plan);
 
@@ -882,7 +1302,7 @@ void bmcv_image_lkpyramid_destroy_plan(
  * @param is_inversed: 0-dct, 1-idct
  * @return
  */
-bm_status_t bmcv_dct_coeff(
+DECL_EXPORT bm_status_t bmcv_dct_coeff(
         bm_handle_t handle,
         int H,
         int W,
@@ -900,7 +1320,7 @@ bm_status_t bmcv_dct_coeff(
  * @param output: dct output
  * @return
  */
-bm_status_t bmcv_image_dct_with_coeff(
+DECL_EXPORT bm_status_t bmcv_image_dct_with_coeff(
         bm_handle_t handle,
         bm_image input,
         bm_device_mem_t hcoeff,
@@ -915,7 +1335,7 @@ bm_status_t bmcv_image_dct_with_coeff(
  * @param output
  * @return
  */
-bm_status_t bmcv_image_dct(
+DECL_EXPORT bm_status_t bmcv_image_dct(
         bm_handle_t handle,
         bm_image input,
         bm_image output,
@@ -923,9 +1343,9 @@ bm_status_t bmcv_image_dct(
         );
 
 DECL_EXPORT bm_status_t bmcv_open_cpu_process(bm_handle_t handle);
-bm_status_t bmcv_close_cpu_process(bm_handle_t handle);
+DECL_EXPORT bm_status_t bmcv_close_cpu_process(bm_handle_t handle);
 
-#ifndef USING_CMODEL
+//#ifndef USING_CMODEL
 DECL_EXPORT bm_status_t bmcv_image_vpp_basic(bm_handle_t           handle,
                                  int                   in_img_num,
                                  bm_image*             input,
@@ -959,19 +1379,19 @@ DECL_EXPORT bm_status_t bmcv_image_vpp_convert_padding(
     int                   output_num,
     bm_image              input,
     bm_image *            output,
-    bmcv_padding_atrr_t *        padding_attr,
+    bmcv_padding_atrr_t * padding_attr,
     bmcv_rect_t *         crop_rect = NULL,
     bmcv_resize_algorithm algorithm = BMCV_INTER_LINEAR);
 
 DECL_EXPORT bm_status_t bmcv_image_vpp_stitch(
-    bm_handle_t           handle,
-    int                   input_num,
-    bm_image*              input,
-    bm_image            output,
+    bm_handle_t          handle,
+    int                  input_num,
+    bm_image*            input,
+    bm_image             output,
     bmcv_rect_t*         dst_crop_rect,
     bmcv_rect_t*         src_crop_rect = NULL,
     bmcv_resize_algorithm algorithm = BMCV_INTER_LINEAR);
-#endif
+//#endif
 
 /**
  * Legacy functions
@@ -990,6 +1410,100 @@ bm_status_t bmcv_image_warp(
 bm_status_t bm_image_dev_mem_alloc(bm_image image,
                                    int heap_id = BMCV_HEAP_ANY) __attribute__((deprecated));
 #endif
+
+DECL_EXPORT bm_status_t bmcv_image_warp_perspective_similar_to_opencv(
+    bm_handle_t                       handle,
+    int                               image_num,
+    bmcv_perspective_image_matrix     matrix[4],
+    bm_image *                        input,
+    bm_image *                        output,
+    int                               use_bilinear);
+
+DECL_EXPORT bm_status_t bm1684x_vpp_fill_rectangle(
+  bm_handle_t          handle,
+  int                  input_num,
+  bm_image *           input,
+  bm_image *           output,
+  bmcv_rect_t*         input_crop_rect,
+  unsigned char        r,
+  unsigned char        g,
+  unsigned char        b);
+
+DECL_EXPORT bm_status_t bm1684x_vpp_cmodel_csc_resize_convert_to(
+  bm_handle_t             handle,
+  int                     frame_number,
+  bm_image*               input,
+  bm_image*               output,
+  bmcv_rect_t*            input_crop_rect,
+  bmcv_padding_atrr_t*    padding_attr,
+  bmcv_resize_algorithm   algorithm,
+  csc_type_t              csc_type,
+  csc_matrix_t*           matrix,
+  bmcv_convert_to_attr*   convert_to_attr);
+
+DECL_EXPORT bm_status_t bm1684x_vpp_cmodel_border(
+  bm_handle_t             handle,
+  int                     rect_num,
+  bm_image*               input,
+  bm_image*               output,
+  bmcv_rect_t*            rect,
+  int                     line_width,
+  unsigned char           r,
+  unsigned char           g,
+  unsigned char           b);
+
+DECL_EXPORT bm_status_t bmcv_image_mosaic(
+  bm_handle_t           handle,
+  int                   mosaic_num,
+  bm_image              input,
+  bmcv_rect_t *         mosaic_rect,
+  int                   is_expand);
+
+DECL_EXPORT bm_status_t bmcv_image_watermark_superpose(
+  bm_handle_t           handle,
+  bm_image *            image,
+  bm_device_mem_t *     bitmap_mem,
+  int                   bitmap_num,
+  int                   bitmap_type,
+  int                   pitch,
+  bmcv_rect_t *         rects,
+  bmcv_color_t          color);
+
+DECL_EXPORT bm_status_t bmcv_image_watermark_repeat_superpose(
+  bm_handle_t           handle,
+  bm_image              image,
+  bm_device_mem_t       bitmap_mem,
+  int                   bitmap_num,
+  int                   bitmap_type,
+  int                   pitch,
+  bmcv_rect_t *         rects,
+  bmcv_color_t          color);
+
+DECL_EXPORT bm_status_t bmcv_image_csc_convert_to(
+  bm_handle_t             handle,
+  int                     img_num,
+  bm_image*               input,
+  bm_image*               output,
+  int*                    crop_num_vec,
+  bmcv_rect_t*            crop_rect,
+  bmcv_padding_atrr_t*    padding_attr,
+  bmcv_resize_algorithm   algorithm,
+  csc_type_t              csc_type,
+  csc_matrix_t*           matrix,
+  bmcv_convert_to_attr*   convert_to_attr);
+
+DECL_EXPORT bm_status_t bmcv_image_vpp_basic_v2(
+  bm_handle_t             handle,
+  int                     img_num,
+  bm_image*               input,
+  bm_image*               output,
+  int*                    crop_num_vec,
+  bmcv_rect_t*            crop_rect,
+  bmcv_padding_atrr_t*    padding_attr,
+  bmcv_resize_algorithm   algorithm,
+  csc_type_t              csc_type,
+  csc_matrix_t*           matrix,
+  bmcv_convert_to_attr*   convert_to_attr);
 
 #if defined(__cplusplus)
 }

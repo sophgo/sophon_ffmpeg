@@ -1,12 +1,19 @@
-/**
-* @file bm_video_interface.h
-* @author
-* @brief This module contains the interface definition for bm1682 video decoder component.
-*/
+/*****************************************************************************
+ *
+ *    Copyright (C) 2022 Sophgo Technologies Inc.  All rights reserved.
+ *
+ *    bmvid is licensed under the 2-Clause BSD License except for the
+ *    third-party components.
+ *
+ *****************************************************************************/
+/* This library provides a high-level interface for controlling the BitMain
+ * Sophon VPU en/decoder.
+ */
+
 #ifndef BM_VIDEO_INTERFACE_H
 #define BM_VIDEO_INTERFACE_H
 
-#define STREAM_BUF_SIZE                 0x700000
+#define STREAM_BUF_SIZE                 0x400000
 #define TRY_FLOCK_OPEN
 
 #if defined(_WIN32) || defined(WIN32) || defined(__WIN32__)
@@ -42,10 +49,10 @@ typedef struct {
 
     int                 pcie_board_id;
     int                 pcie_no_copyback;
-
     int                 enable_cache;
     int                 skip_mode;                  //2 only decode I frames.
     int                 perf;
+    int                 core_idx;
     int                 reserved[13];
 } BMVidDecParam;
 

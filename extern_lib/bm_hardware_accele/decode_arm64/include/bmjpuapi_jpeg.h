@@ -68,6 +68,9 @@ typedef struct
     BmJpuColorFormat color_format;
 
     int chroma_interleave;
+
+    int framebuffer_recycle;
+    size_t framebuffer_size;
 }
 BmJpuJPEGDecInfo;
 
@@ -76,16 +79,14 @@ typedef struct
 {
     BmJpuDecoder *decoder;
 
-    BmJpuDMABufferAllocator *dma_buffer_allocator;
-
-    BmJpuDMABuffer *bitstream_buffer;
+    bm_device_mem_t *bitstream_buffer;
     size_t bitstream_buffer_size;
     unsigned int bitstream_buffer_alignment;
 
     BmJpuDecInitialInfo initial_info;
 
     BmJpuFramebuffer *framebuffers;
-    BmJpuDMABuffer **fb_dmabuffers;
+    bm_device_mem_t *fb_dmabuffers;
     unsigned int num_framebuffers;
     unsigned int num_extra_framebuffers; // TODO
     BmJpuFramebufferSizes calculated_sizes;
@@ -93,13 +94,17 @@ typedef struct
     BmJpuRawFrame raw_frame;
     int device_index;
 
-    BmJpuFramebuffer *cur_buffer;
+    BmJpuFramebuffer *cur_framebuffer;
+    bm_device_mem_t *cur_dma_buffer;
     void *opaque;
 
     int rotationEnable;
     int mirrorEnable;
     int mirrorDirection;
     int rotationAngle;
+
+    int framebuffer_recycle;
+    size_t framebuffer_size;
 }
 BmJpuJPEGDecoder;
 
@@ -117,7 +122,6 @@ BmJpuJPEGDecoder;
  * If unsure, keep this to zero. */
 DECL_EXPORT BmJpuDecReturnCodes bm_jpu_jpeg_dec_open(BmJpuJPEGDecoder **jpeg_decoder,
                                          BmJpuDecOpenParams *open_params,
-                                         BmJpuDMABufferAllocator *dma_buffer_allocator,
                                          unsigned int num_extra_framebuffers);
 
 /* Closes a JPEG decoder instance. Trying to close the same instance multiple times results in undefined behavior. */
@@ -233,7 +237,6 @@ typedef struct _BmJpuJPEGEncoder BmJpuJPEGEncoder;
  * If dma_buffer_allocator is NULL, the default encoder allocator is used.
  */
 DECL_EXPORT BmJpuEncReturnCodes bm_jpu_jpeg_enc_open(BmJpuJPEGEncoder **jpeg_encoder,
-                                         BmJpuDMABufferAllocator *dma_buffer_allocator,
                                          int bs_buffer_size,
                                          int device_index);
 

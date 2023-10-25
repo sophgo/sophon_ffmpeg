@@ -38,10 +38,10 @@
 #include "pixdesc.h"
 #include "imgutils.h"
 
-#include "bm_ion.h"
-#include "bmvppapi.h"
+#include "bmvpuapi.h"
 
 #define BM_FRAME_ALIGNMENT  64
+#define HEAP_MASK_1_2 0x06
 
 static const enum AVPixelFormat supported_sw_formats[] = {
     AV_PIX_FMT_NV12,
@@ -55,37 +55,6 @@ static const enum AVPixelFormat supported_sw_formats[] = {
     AV_PIX_FMT_RGBP,
     AV_PIX_FMT_BGRP,
 };
-
-static void bmcodec_set_log_level(void)
-{
-    int av_level = av_log_get_level();
-
-    switch (av_level)
-    {
-    case AV_LOG_QUIET:
-    case AV_LOG_PANIC:
-    case AV_LOG_FATAL:
-    case AV_LOG_ERROR:
-        bmvpp_set_log_level(BMVPP_LOG_ERR);
-        break;
-    case AV_LOG_WARNING:
-        bmvpp_set_log_level(BMVPP_LOG_WARN);
-        break;
-    case AV_LOG_INFO:
-    case AV_LOG_VERBOSE:
-        bmvpp_set_log_level(BMVPP_LOG_INFO);
-        break;
-    case AV_LOG_DEBUG:
-        bmvpp_set_log_level(BMVPP_LOG_DEBUG);
-        break;
-    case AV_LOG_TRACE:
-        bmvpp_set_log_level(BMVPP_LOG_TRACE);
-        break;
-    default  :
-        bmvpp_set_log_level(BMVPP_LOG_INFO);
-        break;
-    }
-}
 
 static int bmcodec_device_create(AVHWDeviceContext *ctx, const char *device,
                                  AVDictionary *opts, int flags)
@@ -119,8 +88,6 @@ static int bmcodec_device_create(AVHWDeviceContext *ctx, const char *device,
     hwctx->device_idx = 0;
 #endif
 
-    bmcodec_set_log_level();
-
     av_log(ctx, AV_LOG_TRACE, "[%s,%d] leave\n", __func__, __LINE__);
 
     return ret;
@@ -133,16 +100,10 @@ static int bmcodec_device_init(AVHWDeviceContext *ctx)
 
     av_log(ctx, AV_LOG_TRACE, "[%s,%d] enter\n", __func__, __LINE__);
 
-    ret = bm_ion_allocator_open(hwctx->device_idx);
-    if (ret != 0) {
-        av_log(ctx, AV_LOG_ERROR, "bm_ion_allocator_open failed\n");
-        ret = -1;
-        goto Exit;
-    }
-
-    ret = bmvpp_open(hwctx->device_idx);
-    if (ret != 0) {
-        av_log(ctx, AV_LOG_ERROR, "bmvpp_open failed\n");
+    ret = bm_dev_request(&hwctx->handle, hwctx->device_idx);
+    if(ret != BM_SUCCESS)
+    {
+        av_log(ctx, AV_LOG_ERROR, "bmlib create handle failed\n");
         ret = -1;
         goto Exit;
     }
@@ -158,9 +119,8 @@ static void bmcodec_device_uninit(AVHWDeviceContext *ctx)
 
     av_log(ctx, AV_LOG_TRACE, "[%s,%d] enter\n", __func__, __LINE__);
 
-    bm_ion_allocator_close(hwctx->device_idx);
-
-    bmvpp_close(hwctx->device_idx);
+    if(hwctx->handle)
+        bm_dev_free(hwctx->handle);
 
     av_log(ctx, AV_LOG_TRACE, "[%s,%d] leave\n", __func__, __LINE__);
 }
@@ -202,21 +162,22 @@ static int bmcodec_frames_get_constraints(AVHWDeviceContext* ctx,
 static void bmcodec_buffer_free(void* opaque, uint8_t* data)
 {
     AVHWFramesContext* ctx = opaque;
-    //AVBmCodecDeviceContext* hwctx = ctx->device_ctx->hwctx;
+    AVBmCodecDeviceContext* hwctx = ctx->device_ctx->hwctx;
     AVBmCodecFrame   *hwpic  = (AVBmCodecFrame*)data;
     int ret;
-    bm_ion_buffer_t *buffer;
+    bm_device_mem_t *buffer;
 
     av_log(ctx, AV_LOG_TRACE, "[%s,%d] enter\n", __func__, __LINE__);
 
     /* call bm free function to free buffer */
-    buffer = (bm_ion_buffer_t*)hwpic->buffer;
-    if (buffer && buffer->memFd == -1)
-        av_free(buffer);
-    else{
-        ret = bm_ion_free_buffer(buffer);
-        if (ret != 0) {
-            av_log(ctx, AV_LOG_ERROR, "[%s,%d] bm_ion_free_buffer failed.\n", __func__, __LINE__);
+    buffer = (bm_device_mem_t*)hwpic->buffer;
+    if(buffer){
+        if(buffer->u.device.dmabuf_fd == -1)
+        {
+            av_free(buffer);
+        }else{
+            bm_free_device(hwctx->handle, *buffer);
+            av_free(buffer);
         }
     }
 
@@ -233,17 +194,20 @@ static AVBufferRef* bmcodec_pool_alloc(void *opaque, int size)
 
     AVBufferRef *ref = NULL;
     AVBmCodecFrame   *hwpic  = NULL;
-    void *buffer = NULL;
     int ret;
 
     av_log(ctx, AV_LOG_TRACE, "[%s,%d] enter\n", __func__, __LINE__);
 
     /* call bm allocation function to allocate buffer */
-    buffer = (void*)bm_ion_allocate_buffer(hwctx->device_idx, size, (BM_ION_FLAG_VPU<<4) | BM_ION_FLAG_CACHED);
-    if (buffer == NULL) {
-        av_log(ctx, AV_LOG_ERROR, "[%s,%d] bm_ion_allocate_buffer failed.\n", __func__, __LINE__);
+    bm_device_mem_t *buffer = (bm_device_mem_t *)av_mallocz(sizeof(bm_device_mem_t));
+    ret = bmvpu_malloc_device_byte_heap(hwctx->handle, buffer, size, HEAP_MASK_1_2, 1);
+    if(ret != BM_SUCCESS)
+    {
+        av_free(buffer);
+        av_log(ctx, AV_LOG_ERROR, "[%s,%d] bmvpu_malloc_device_byte_heap failed.\n", __func__, __LINE__);
         goto fail;
     }
+
     frmctx->type = 1;
 
     hwpic = av_mallocz(sizeof(AVBmCodecFrame));
@@ -253,6 +217,7 @@ static AVBufferRef* bmcodec_pool_alloc(void *opaque, int size)
     }
     hwpic->type   = 1;
     hwpic->maptype= 0;
+    hwpic->handle = hwctx->handle;
     hwpic->buffer = buffer;
     hwpic->padded = 0;
 
@@ -260,10 +225,7 @@ static AVBufferRef* bmcodec_pool_alloc(void *opaque, int size)
     if (!ref) {
         av_log(ctx, AV_LOG_ERROR, "[%s,%d] av_buffer_create failed.\n", __func__, __LINE__);
         /* call bm free function to free buffer */
-        ret = bm_ion_free_buffer((bm_ion_buffer_t*)buffer);
-        if (ret != 0) {
-            av_log(ctx, AV_LOG_ERROR, "[%s,%d] bm_ion_free_buffer failed.\n", __func__, __LINE__);
-        }
+        bm_free_device(hwctx->handle, *((bm_device_mem_t *)buffer));
         av_free(hwpic);
         goto fail;
     }
@@ -295,7 +257,11 @@ static int bmcodec_image_fill_arrays(uint8_t *dst_data[4], int dst_linesize[4],
     else
         dst_linesize[0] = FFALIGN(dst_linesize[0], BM_FRAME_ALIGNMENT);
 
-    return av_image_fill_pointers(dst_data, pix_fmt, height, (uint8_t *)src, dst_linesize);
+    ret = av_image_fill_pointers(dst_data, pix_fmt, height, (uint8_t *)src, dst_linesize);
+    if (pix_fmt == AV_PIX_FMT_GRAY8 && dst_data[1]) // to defense FF_API_PSEDUOPAL setting
+        dst_data[1] = NULL;
+
+    return ret;
 }
 
 static int bmcodec_image_get_buffer_size(enum AVPixelFormat pix_fmt, int width, int height, int codec_id)
@@ -353,7 +319,7 @@ static int bmcodec_frames_init(AVHWFramesContext *ctx)
 static int bmcodec_get_buffer(AVHWFramesContext *ctx, AVFrame *frame)
 {
     AVBmCodecFrame   *hwpic = NULL;
-    bm_ion_buffer_t *buffer = NULL;
+    bm_device_mem_t *buffer = NULL;
     BmCodecFramesContext *priv = ctx->internal->priv;
     int i, ret;
 
@@ -369,13 +335,13 @@ static int bmcodec_get_buffer(AVHWFramesContext *ctx, AVFrame *frame)
     frame->data[4] = frame->buf[0]->data;
 
     hwpic = (AVBmCodecFrame*)(frame->buf[0]->data);
-    buffer = (bm_ion_buffer_t*)hwpic->buffer;
+    buffer = (bm_device_mem_t*)hwpic->buffer;
 
     av_log(ctx, AV_LOG_TRACE, "[%s,%d] paddr=0x%lx, size=%d\n",
-           __func__, __LINE__, buffer->paddr, buffer->size);
+           __func__, __LINE__, buffer->u.device.device_addr, buffer->size);
 
     ret = bmcodec_image_fill_arrays(hwpic->data, hwpic->linesize,
-                                    (uint8_t*)(buffer->paddr), ctx->sw_format,
+                                    (uint8_t*)(buffer->u.device.device_addr), ctx->sw_format,
                                     ctx->width, ctx->height, priv->codec_id);
     if (ret < 0)
         return ret;
@@ -421,25 +387,27 @@ static void bm_unmap_frame(AVHWFramesContext *ctx, HWMapDescriptor *hwmap)
     AVBmCodecFrame* hwpic = (AVBmCodecFrame*)hwmap->source->data[4];
     bm_ion_buffer_t*    p = (bm_ion_buffer_t*)hwpic->buffer;
 #endif
-    bm_ion_buffer_t* p = hwmap->priv;
+    AVBmCodecDeviceContext *hwctx = ctx->device_ctx->hwctx;
+    bm_device_mem_t* p = hwmap->priv;
 
-    if (p==NULL || p->memFd==-1) // reserved memory need not munmap
+    if (p==NULL || p->u.device.dmabuf_fd ==-1) // reserved memory need not munmap
         return;
 
     /* unmap virtual buffer */
 
     /* if write flags, flush pa */
-    if (p->map_flags | BM_ION_MAPPING_FLAG_WRITE)
-        bm_ion_flush_buffer(p);
+    //if (p->map_flags | BM_ION_MAPPING_FLAG_WRITE)
+    // bm_mem_flush_device_mem(hwctx->handle, p);
 
-    bm_ion_unmap_buffer(p);
+    bm_mem_unmap_device_mem(hwctx->handle, hwctx->map_vaddr, p->size);
 }
 
 static int bm_map_frame(AVHWFramesContext *ctx, AVFrame *dst, const AVFrame *src,
                         int flags)
 {
     AVBmCodecFrame*   hwpic = (AVBmCodecFrame*)src->data[4];
-    bm_ion_buffer_t* buffer = (bm_ion_buffer_t*)hwpic->buffer;
+    bm_device_mem_t* buffer = (bm_device_mem_t*)hwpic->buffer;
+    AVBmCodecDeviceContext *hwctx = ctx->device_ctx->hwctx;
     BmCodecFramesContext *priv = ctx->internal->priv;
     uint32_t map_flags = 0;
     int ret;
@@ -465,28 +433,25 @@ static int bm_map_frame(AVHWFramesContext *ctx, AVFrame *dst, const AVFrame *src
         return AVERROR_INVALIDDATA;
     }
 
-    if (flags & AV_HWFRAME_MAP_READ)
-        map_flags |= BM_ION_MAPPING_FLAG_READ;
-    if ((flags & AV_HWFRAME_MAP_WRITE) ||
-        (flags & AV_HWFRAME_MAP_OVERWRITE)) // TODO
-        map_flags |= BM_ION_MAPPING_FLAG_WRITE;
-
-    if (buffer->memFd!=-1){ // ion memory
-        ret = bm_ion_map_buffer(buffer, map_flags);
+    hwctx->map_vaddr = hwpic->buffer_vaddr;
+    if (buffer->u.device.dmabuf_fd != -1){ // ion memory
+         unsigned long long vmem = 0;
+        bm_mem_mmap_device_mem_no_cache(hwctx->handle, buffer, &vmem);
         if (ret < 0) {
             av_log(ctx, AV_LOG_ERROR, "bm_ion_map_buffer failed\n");
             return AVERROR_EXTERNAL;
         }
+        hwctx->map_vaddr = (uint8_t*)vmem;
 
-        ret = bm_ion_invalidate_buffer(buffer);
-        if (ret < 0) {
-            av_log(ctx, AV_LOG_ERROR, "bm_ion_invalidate_buffer failed\n");
-            return AVERROR_EXTERNAL;
-        }
+        // bm_mem_invalidate_device_mem(hwctx->handle, buffer);
+        // if (ret < 0) {
+        //     av_log(ctx, AV_LOG_ERROR, "bm_ion_invalidate_buffer failed\n");
+        //     return AVERROR_EXTERNAL;
+        // }
     }
 
     ret = bmcodec_image_fill_arrays(dst->data, dst->linesize,
-                                    buffer->vaddr, ctx->sw_format,
+                                    hwctx->map_vaddr, ctx->sw_format,
                                     ctx->width, ctx->height,
                                     priv->codec_id);
     if (ret < 0)
@@ -504,21 +469,24 @@ static int bm_map_frame(AVHWFramesContext *ctx, AVFrame *dst, const AVFrame *src
     return 0;
 
 fail:
-    if (buffer->memFd!=-1)
-        bm_ion_unmap_buffer(buffer);
+    if (buffer->u.device.dmabuf_fd !=-1)
+        bm_mem_unmap_device_mem(hwctx->handle, hwctx->map_vaddr, buffer->size);
 
     return ret;
 }
 #endif
 
 #ifdef BM_PCIE_MODE
-static int bm_image_download(int soc_idx,
+static int bm_image_download(AVHWFramesContext *ctx, int soc_idx,
                            uint8_t *dst_data[4], int dst_linesizes[4],
                            const uint64_t src_data[4], int src_linesizes[4],
                            enum AVPixelFormat pix_fmt, int width, int height)
 {
+    AVBmCodecDeviceContext *hwctx = ctx->device_ctx->hwctx;
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
+    bm_device_mem_t src_mem;
     int i, planes_nb = 0;
+    unsigned int size = 0;
     int ret;
 
     for (i = 0; i < desc->nb_components; i++)
@@ -549,7 +517,10 @@ static int bm_image_download(int soc_idx,
                "plane %d: bwidth %zd, dst_linesize %zd, src_linesize %zd\n",
                i, bwidth, dst_linesize, src_linesize);
 
-        ret = bm_ion_download_data2(soc_idx, src, dst, src_linesize * h);
+
+        size = src_linesize * h;
+        src_mem = bm_mem_from_device(src, size);
+        bm_memcpy_d2s_partial(hwctx->handle, dst,src_mem, size);
         if (ret < 0) {
             av_log(NULL, AV_LOG_ERROR, "bmvpu_upload_data failed\n");
             return -1;
@@ -559,13 +530,16 @@ static int bm_image_download(int soc_idx,
     return 0;
 }
 
-static int bm_image_upload(int soc_idx,
+static int bm_image_upload(AVHWFramesContext *ctx,int soc_idx,
                            uint64_t dst_data[4], int dst_linesizes[4],
                            uint8_t *src_data[4], int src_linesizes[4],
                            enum AVPixelFormat pix_fmt, int width, int height)
 {
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
+    AVBmCodecDeviceContext *hwctx  = ctx->device_ctx->hwctx;
     int i, planes_nb = 0;
+    unsigned int size;
+    bm_device_mem_t dst_mem;
     int ret;
 
     for (i = 0; i < desc->nb_components; i++)
@@ -596,7 +570,9 @@ static int bm_image_upload(int soc_idx,
                "plane %d: bwidth %zd, dst_linesize %zd, src_linesize %zd\n",
                i, bwidth, dst_linesize, src_linesize);
 
-        ret = bm_ion_upload_data2(soc_idx, dst, src, src_linesize*h);
+        size = src_linesize * h;
+        dst_mem = bm_mem_from_device(dst, size);
+        bm_memcpy_s2d_partial(hwctx->handle, dst_mem , src, size);
         if (ret < 0) {
             av_log(NULL, AV_LOG_ERROR, "bmvpu_upload_data failed\n");
             return -1;
@@ -692,7 +668,7 @@ static int bm_transfer_data_from(AVHWFramesContext *ctx, AVFrame *dst, const AVF
 
     av_log(ctx, AV_LOG_TRACE, "%s: downloading ...\n", __func__);
 
-    ret = bm_image_download(soc_idx,
+    ret = bm_image_download(ctx, soc_idx,
                             dst_data, dst_linesizes,
                             src_data, src_linesizes,
                             dst->format, src->width, src->height);
@@ -823,7 +799,7 @@ static int bm_transfer_data_to(AVHWFramesContext *ctx, AVFrame *dst, const AVFra
 
     av_log(ctx, AV_LOG_TRACE, "%s: uploading ...\n", __func__);
 
-    ret = bm_image_upload(soc_idx,
+    ret = bm_image_upload(ctx, soc_idx,
                           dst_data, dst_linesizes,
                           src_data, src_linesizes,
                           src->format, src->width, src->height);

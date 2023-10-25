@@ -45,8 +45,14 @@
 #include "internal.h"
 #include "scale.h"
 #include "video.h"
-#include "bm_ion.h"
 #include "bmcv_api_ext_c.h"
+#include "bmlib_runtime.h"
+#include "bmvpuapi.h"
+
+#define HEAP_MASK_1_2 0x06
+
+static int bmscale_avimage_fill_arrays(uint8_t *dst_data[4], int dst_linesize[4], const uint8_t *src, enum AVPixelFormat pix_fmt, int width, int height, int align);
+static int bmscale_avimage_get_buffer_size(enum AVPixelFormat pix_fmt, int width, int height, int align);
 
 struct ColorSapce2CSCMap {
     enum AVColorSpace color_space;
@@ -93,6 +99,7 @@ static int bmcv_get_csc_type_by_colorinfo(int color_space, int color_range, int 
         *p_csc_type = CSC_MAX_ENUM;
     }
     else{
+        ret = -1;
         for(int i = 0; i< (sizeof(g_csc_map)/sizeof(g_csc_map[0])); ++i) {
             if (g_csc_map[i].color_range == color_range && g_csc_map[i].color_space == color_space) {
                 ret = 0;
@@ -216,10 +223,12 @@ typedef struct BmScaleContext {
     FILE*  outf;
     FILE*  blackf;
 
+    bm_handle_t handle;
     /* add bmvpp support for normal pipeline */
     int soc_idx;
     int is_bmvpp_inited;
     int zero_copy;
+    int stride_align;
     struct list_head freed_avbuffer_list;
     struct list_head module_entry;
 
@@ -227,7 +236,6 @@ typedef struct BmScaleContext {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 // for scale_bm new version
-#define BM_STRIDE_ALIGN 64
 #define BMVPP_MAX_CONVERT_STAGE_NUM 8
 #define BMVPP_ALLOC(type, n) (type*)av_mallocz(sizeof(type)*(n))
 
@@ -263,10 +271,11 @@ struct bmscale_avbuffer_ctx_s {
     int format;
     int width;
     int height;
-    bm_ion_buffer_t *ion_buff;
+    bm_device_mem_t* ion_buff;
     uint8_t *vaddr;
     int soc_idx;
     int black_filled;
+    bm_handle_t handle;
     BmScaleContext* ctx;
     struct list_head entry;
 };
@@ -379,8 +388,9 @@ static void bmscale_avbuffer_release(struct bmscale_avbuffer_ctx_s *avbuffer_ctx
     }
     // do real free.
     soc_idx = avbuffer_ctx->soc_idx;
-    if (avbuffer_ctx->ion_buff) {
-        bm_ion_free_buffer(avbuffer_ctx->ion_buff);
+    if (avbuffer_ctx->ion_buff->size != 0) {
+        bm_free_device(avbuffer_ctx->handle, *(avbuffer_ctx->ion_buff));
+        bm_dev_free(avbuffer_ctx->handle);
     }
 
     // for pcie, system memory is allocated by av_malloc
@@ -388,7 +398,6 @@ static void bmscale_avbuffer_release(struct bmscale_avbuffer_ctx_s *avbuffer_ctx
         av_freep(&avbuffer_ctx->vaddr);
     }
 
-    bm_ion_allocator_close(soc_idx);
     av_free(avbuffer_ctx);
 }
 
@@ -413,6 +422,28 @@ static void bmscale_avbuffer_recycle(void *ctx, uint8_t *data)
     }
 }
 
+static int bmscale_avimage_get_buffer_size(enum AVPixelFormat pix_fmt,
+                             int width, int height, int align)
+{
+    uint8_t *data[4];
+    int linesize[4];
+    int ret;
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
+    if (!desc)
+        return AVERROR(EINVAL);
+
+    ret = av_image_check_size(width, height, 0, NULL);
+    if (ret < 0)
+        return ret;
+
+    // do not include palette for these pseudo-paletted formats
+    if (desc->flags & FF_PSEUDOPAL)
+        return FFALIGN(width, align) * height;
+
+    return bmscale_avimage_fill_arrays(data, linesize, NULL, pix_fmt,
+                                width, height, align);
+}
+
 static struct bmscale_avbuffer_ctx_s* bmscale_buffer_pool_alloc(BmScaleContext *ctx, int format, int width, int height)
 {
     int ret = 0;
@@ -420,6 +451,8 @@ static struct bmscale_avbuffer_ctx_s* bmscale_buffer_pool_alloc(BmScaleContext *
     struct bmscale_avbuffer_ctx_s* hwpic = NULL;
     int found = 0;
     int total_buffer_size = 0;
+    bm_handle_t handle;
+
     list_for_each_entry(hwpic, &ctx->freed_avbuffer_list, entry, struct bmscale_avbuffer_ctx_s) {
         if (hwpic->format == format && hwpic->width == width && hwpic->height == height) {
             found = 1;
@@ -441,32 +474,34 @@ static struct bmscale_avbuffer_ctx_s* bmscale_buffer_pool_alloc(BmScaleContext *
     hwpic->height = height;
     hwpic->soc_idx = ctx->soc_idx;
     hwpic->ctx = ctx;
-    ret = bm_ion_allocator_open(soc_idx);
-    if (ret != 0) {
-        av_log(NULL, AV_LOG_ERROR, "ion_allocator_open() failed!\n");
-        return NULL;
-    }
 
     // allocate continuous memory from device,
-    total_buffer_size = av_image_get_buffer_size(format, width, height, BM_STRIDE_ALIGN);
-    hwpic->ion_buff = bm_ion_allocate_buffer(soc_idx, total_buffer_size, (BM_ION_FLAG_VPU << 4) | BM_ION_FLAG_CACHED);
-    if (hwpic->ion_buff == NULL) {
-        av_log(NULL, AV_LOG_ERROR, "[%s, %d] bm_ion_allocate_buffer() failed!\n", __FILE__, __LINE__);
-        bm_ion_allocator_close(soc_idx);
+    total_buffer_size = bmscale_avimage_get_buffer_size(format, width, height, ctx->stride_align);
+
+    hwpic->ion_buff = (bm_device_mem_t *)av_mallocz(sizeof(bm_device_mem_t));
+
+    //Handle is required for bmlib release,This is essential!!!
+    bm_dev_request(&handle, hwpic->soc_idx);
+
+    hwpic->handle = handle;
+
+    ret = bmvpu_malloc_device_byte_heap(handle, hwpic->ion_buff, total_buffer_size, HEAP_MASK_1_2, 1);
+    if(ret != BM_SUCCESS)
+    {
+        av_log(NULL, AV_LOG_ERROR, "[%s, %d] bmvpu_malloc_device_byte_heap() failed!\n", __FILE__, __LINE__);
+        free(hwpic->ion_buff);
         av_free(hwpic);
         return NULL;
     }
 
-    if (hwpic->ion_buff->vaddr == NULL) {
         hwpic->vaddr = av_malloc(total_buffer_size);
         if (hwpic->vaddr == NULL) {
             av_log(ctx, AV_LOG_ERROR, "malloc err!\n");
-            bm_ion_free_buffer(hwpic->ion_buff);
-            bm_ion_allocator_close(soc_idx);
+            bm_free_device(ctx->handle, *(hwpic->ion_buff));
+            av_free(hwpic->ion_buff);
             av_free(hwpic);
             return NULL;
         }
-    }
 
     return hwpic;
 }
@@ -474,6 +509,9 @@ static struct bmscale_avbuffer_ctx_s* bmscale_buffer_pool_alloc(BmScaleContext *
 static int bmscale_init(AVFilterContext *ctx)
 {
     BmScaleContext *s = ctx->priv;
+    bm_handle_t handle;
+    unsigned int chipid;
+    int ret;
 
     av_log(s, AV_LOG_TRACE, "[%s,%d] enter\n", __func__, __LINE__);
 
@@ -544,6 +582,20 @@ static int bmscale_init(AVFilterContext *ctx)
     list_init(&s->module_entry);
     list_add(&g_module_list, &s->module_entry);
 
+    ret = bm_dev_request(&handle, s->soc_idx);
+    if (ret != BM_SUCCESS) {
+        av_log(s, AV_LOG_ERROR, "Create bm handle failed. ret = %d\n", ret);
+        return ret;
+    }
+    bm_get_chipid(handle, &chipid);
+    if (chipid == 0x1684) {
+        s->stride_align = 64;
+    }
+    else {
+        s->stride_align = 1;
+    }
+    bm_dev_free(handle);
+
     av_log(s, AV_LOG_TRACE, "[%s,%d] leave\n", __func__, __LINE__);
 
     return 0;
@@ -565,8 +617,7 @@ static void bmscale_uninit(AVFilterContext *ctx)
     list_del(&s->module_entry);
 
     if (s->is_bmvpp_inited) {
-
-        bm_ion_allocator_close(s->soc_idx);
+        bm_dev_free(s->handle);
         s->is_bmvpp_inited = 0;
     }
 
@@ -669,7 +720,7 @@ static int init_black_picture(BmScaleContext *s, AVFrame* black)
 {
     AVHWFramesContext* frm_ctx = (AVHWFramesContext*)black->hw_frames_ctx->data;
     AVBmCodecFrame*      hwpic = (AVBmCodecFrame*)black->data[4];
-    bm_ion_buffer_t*        pb = (bm_ion_buffer_t*)hwpic->buffer;
+    bm_device_mem_t         *pb = (bm_device_mem_t *)hwpic->buffer;
     uint8_t *p, *c;
     int size0, size1, total_size;
     int ret;
@@ -698,9 +749,11 @@ static int init_black_picture(BmScaleContext *s, AVFrame* black)
         memset(p,    0, total_size);
     }
 
-    ret = bm_ion_upload_data(p, pb, total_size);
-    if (ret < 0) {
-        av_log(s, AV_LOG_ERROR, "bm_ion_upload_data failed\n");
+    if(!s->handle)
+        s->handle = hwpic->handle;
+    ret = bm_memcpy_s2d(s->handle, *pb, p);
+    if ( ret != BM_SUCCESS) {
+        av_log(s, AV_LOG_ERROR, "bm_memcpy_s2d failed\n");
         return AVERROR_EXTERNAL;
     }
 
@@ -877,7 +930,7 @@ static int init_hw_out_contexts(BmScaleContext *s, AVBufferRef *device_ctx)
 
 
     return 0;
-    fail:
+fail:
     av_buffer_unref(&out_ref);
     av_buffer_unref(&rgb_ref);
     av_buffer_unref(&yuv420p_ref);
@@ -989,7 +1042,7 @@ static int bmscale_config_props_hwaccel(AVFilterLink *outlink)
     av_log(s, AV_LOG_TRACE, "[%s,%d] leave\n", __func__, __LINE__);
     return 0;
 
-    fail:
+fail:
     return ret;
 }
 
@@ -1049,9 +1102,9 @@ static int bmscale_config_props(AVFilterLink *outlink)
 
     s->csc = bmscale_csc_calulate(in_format, out_format);
     if (!s->is_bmvpp_inited) {
-        ret = bm_ion_allocator_open(s->soc_idx);
-        if (ret < 0){
-            av_log(s, AV_LOG_ERROR, "bm_ion_allocator_open(%d) err=%d\n", s->soc_idx, ret);
+        ret = bm_dev_request(&s->handle, s->soc_idx);
+        if (ret != BM_SUCCESS){
+            av_log(s, AV_LOG_ERROR, "bm_dev_request(%d) err=%d\n", s->soc_idx, ret);
             goto fail;
         }
         s->is_bmvpp_inited = 1;
@@ -1069,8 +1122,8 @@ static int bmscale_config_props(AVFilterLink *outlink)
 
     return 0;
 
-    fail:
-    bm_ion_allocator_close(s->soc_idx);
+fail:
+    bm_dev_free(s->handle);
     return ret;
 }
 
@@ -1092,7 +1145,7 @@ static int download_data(AVFrame* frame, FILE* outf)
 
     yuv = malloc(total_size);
 
-    av_log(NULL, AV_LOG_DEBUG, "bm_ion_download_data begin: buffer = %p\n", hwpic->buffer);
+    av_log(NULL, AV_LOG_DEBUG, "bm_memcpy_d2s begin: buffer = %p\n", hwpic->buffer);
     av_log(NULL, AV_LOG_TRACE, "data 0: %p\n", hwpic->data[0]);
     av_log(NULL, AV_LOG_TRACE, "data 1: %p\n", hwpic->data[1]);
     av_log(NULL, AV_LOG_TRACE, "data 2: %p\n", hwpic->data[2]);
@@ -1104,11 +1157,12 @@ static int download_data(AVFrame* frame, FILE* outf)
     av_log(NULL, AV_LOG_TRACE, "width : %d\n", frame->width);
     av_log(NULL, AV_LOG_TRACE, "height: %d\n", frame->height);
 
-    ret = bm_ion_download_data(yuv, (bm_ion_buffer_t*)hwpic->buffer, total_size);
+    ret = bm_memcpy_d2s(hwpic->handle, yuv, *((bm_device_mem_t*)hwpic->buffer));
     if (ret != 0) {
-        av_log(NULL, AV_LOG_ERROR, "bm_ion_download_data failed\n");
+        av_log(NULL, AV_LOG_ERROR, "bm_memcpy_d2s failed\n");
         goto Exit;
     }
+
     av_log(NULL, AV_LOG_DEBUG, "bm_ion_download_data end\n");
 
     fwrite(yuv, sizeof(uint8_t), total_size, outf);
@@ -1149,21 +1203,74 @@ static bm_image_format_ext get_format_from_avformat(int sw_format){
     return -1;
 }
 
+static int bmscale_hw_bmimg_from_avframe(bm_handle_t handle, AVHWFramesContext* ctx, AVBmCodecFrame* src, AVFrame* avimg, bm_image* image, int is_compressed){
+    bm_image_format_ext format = get_format_from_avformat(ctx->sw_format);
+    int stride[4] = {src->linesize[0], src->linesize[1], src->linesize[2], src->linesize[3]};
+    uint64_t pa[4]={0};
+    int size[4] = {0};
+    if(is_compressed){
+        pa[0]   = (uint64_t)src->data[2]; // y table
+        pa[1]   = (uint64_t)src->data[0]; // y base
+        pa[2]   = (uint64_t)src->data[3]; // c table
+        pa[3]   = (uint64_t)src->data[1]; // c base
+        size[0] = src->linesize[2];
+        size[1] = src->linesize[0];
+        size[2] = src->linesize[3];
+        size[3] = src->linesize[1];
+        bm_image_create(handle, avimg->height, avimg->width, FORMAT_COMPRESSED, DATA_TYPE_EXT_1N_BYTE, image, stride);
+    }
+    else{
+        pa[0]   = (uint64_t)src->data[0];
+        pa[1]   = (uint64_t)src->data[1];
+        pa[2]   = (uint64_t)src->data[2];
+        switch (format)
+        {
+        case FORMAT_YUV420P:
+            size[2] = stride[2] * avimg->height / 2;
+        case FORMAT_NV12:
+            size[1] = stride[1] * avimg->height / 2;
+            size[0] = stride[0] * avimg->height;
+            break;
+        case FORMAT_YUV422P:
+        case FORMAT_YUV444P:
+        case FORMAT_RGBP_SEPARATE:
+        case FORMAT_BGRP_SEPARATE:
+            size[1] = stride[1] * avimg->height;
+            size[2] = stride[2] * avimg->height;
+        case FORMAT_RGB_PACKED:
+        case FORMAT_BGR_PACKED:
+            size[0] = stride[0] * avimg->height;
+            break;
+        default:
+            av_log(NULL, AV_LOG_ERROR, "bmformat %d is not supported!\n", format);
+            return -1;
+        }
+        bm_image_create(handle, avimg->height, avimg->width, format, DATA_TYPE_EXT_1N_BYTE, image, stride);
+    }
+    bm_device_mem_t mem[4]={0};
+    for(int i = 0; i < 4; i++){
+        bm_set_device_mem(&mem[i], size[i], pa[i]);
+    }
+    bm_image_attach(image[0], mem);
+    return 0;
+}
+
 static int bmscale_copy(BmScaleContext* ctx, AVFrame* dst, AVFrame* src)
 {
     AVHWFramesContext* src_frm_ctx = (AVHWFramesContext*)src->hw_frames_ctx->data;
     AVHWFramesContext* dst_frm_ctx = (AVHWFramesContext*)dst->hw_frames_ctx->data;
     AVBmCodecFrame*          hwsrc = (AVBmCodecFrame*)src->data[4];
     AVBmCodecFrame*          hwdst = (AVBmCodecFrame*)dst->data[4];
-    bm_ion_buffer_t*    ion_buffer = (bm_ion_buffer_t*)hwdst->buffer;
+    bm_device_mem_t*    ion_buffer = (bm_device_mem_t*)hwdst->buffer;
+    bm_device_mem_t*    src_buffer = (bm_device_mem_t*)hwsrc->buffer;
     bm_handle_t handle;
-    int dev_id = ion_buffer->soc_idx;
+    int dev_id = ctx->soc_idx;
     int ret = bm_dev_request(&handle, dev_id);
     if (ret != BM_SUCCESS) {
-        printf("Create bm handle failed. ret = %d\n", ret);
+        av_log(ctx, AV_LOG_ERROR, "Create bm handle failed. ret = %d\n", ret);
         return ret;
     }
-    av_log(ctx, AV_LOG_TRACE, "soc_idx %d\n", ion_buffer->soc_idx);
+    av_log(ctx, AV_LOG_TRACE, "soc_idx %d\n", ctx->soc_idx);
     bm_image bmsrc, bmdst;
     bmcv_rect_t crop;
     if (src_frm_ctx->sw_format != dst_frm_ctx->sw_format ||
@@ -1202,74 +1309,38 @@ static int bmscale_copy(BmScaleContext* ctx, AVFrame* dst, AVFrame* src)
     av_log(ctx, AV_LOG_TRACE, "dst width : %d\n", dst->width);
     av_log(ctx, AV_LOG_TRACE, "dst height: %d\n", dst->height);
 
-    bm_image_format_ext  s_format = get_format_from_avformat(src_frm_ctx->sw_format);
-    int s_stride[4] = {hwsrc->linesize[0], hwsrc->linesize[1], hwsrc->linesize[2], hwsrc->linesize[3]};
-    uint64_t s_pa[4]={0};
-    s_pa[0]   = (uint64_t)hwsrc->data[0];
-    s_pa[1]   = (uint64_t)hwsrc->data[1];
-    s_pa[2]   = (uint64_t)hwsrc->data[2];
-
-    int s_size[4] = {0};
-    s_size[0] = s_stride[0]*src->height;
-    if(s_format == FORMAT_YUV420P || s_format == FORMAT_NV12){
-        s_size[1] = s_stride[1]*src->height/2;
-        s_size[2] = s_stride[2]*src->height/2;
+    ret = bmscale_hw_bmimg_from_avframe(handle, src_frm_ctx, hwsrc, src, &bmsrc, 0);
+    if(ret != BM_SUCCESS){
+        goto fail;
     }
-    else{
-        s_size[1] = s_stride[1]*src->height;
-        s_size[2] = s_stride[2]*src->height;
+    ret = bmscale_hw_bmimg_from_avframe(handle, dst_frm_ctx, hwdst, dst, &bmdst, 0);
+    if(ret != BM_SUCCESS){
+        goto fail;
     }
-
-    bm_image_create(handle, src->height, src->width, s_format, DATA_TYPE_EXT_1N_BYTE, &bmsrc, s_stride);
-    bm_device_mem_t src_mem[4]={0};
-    for(int i = 0; i < 4; i++){
-        bm_set_device_mem(&src_mem[i], s_size[i], s_pa[i]);
-    }
-    bm_image_attach(bmsrc, src_mem);
-    bm_image_format_ext d_format = get_format_from_avformat(dst_frm_ctx->sw_format);
-    int d_stride[4]   = {hwdst->linesize[0], hwdst->linesize[1], hwdst->linesize[2], hwdst->linesize[3]};
-    uint64_t d_pa[4]={0};
-    d_pa[0]   = (uint64_t)hwdst->data[0];
-    d_pa[1]   = (uint64_t)hwdst->data[1];
-    d_pa[2]   = (uint64_t)hwdst->data[2];
-
-    int d_size[4] = {0};
-    d_size[0] = d_stride[0]*dst->height;
-    if(s_format == FORMAT_YUV420P || s_format == FORMAT_NV12){
-        d_size[1] = d_stride[1]*dst->height/2;
-        d_size[2] = d_stride[2]*dst->height/2;
-    }
-    else{
-        d_size[1] = d_stride[1]*dst->height;
-        d_size[2] = d_stride[2]*dst->height;
-    }
-
-    bm_image_create(handle, dst->height, dst->width, d_format, DATA_TYPE_EXT_1N_BYTE, &bmdst, d_stride);
-    bm_device_mem_t dst_mem[4]={0};
-    for(int i = 0; i < 4; i++){
-        bm_set_device_mem(&dst_mem[i], d_size[i], d_pa[i]);
-    }
-    bm_image_attach(bmdst, dst_mem);
-
     crop.start_x = 0;
     crop.start_y = 0;
     crop.crop_w = bmsrc.width;
     crop.crop_h = bmsrc.height;
     csc_type_t csc_type;
     ret = bmcv_get_csc_type_by_colorinfo(src->colorspace, src->color_range, bmsrc.data_type, bmdst.data_type, &csc_type);
-    ret = bmvpp_scale_bmcv(handle, bmsrc, &crop, &bmdst, 0, 0, 0, 0, ctx->flags, csc_type);
-    if (ret != 0) {
-        av_log(ctx, AV_LOG_ERROR, "bmvpp_copy failed\n");
-        return AVERROR_EXTERNAL;
+    if(ret != BM_SUCCESS){
+        goto fail;
     }
-
+    ret = bmvpp_scale_bmcv(handle, bmsrc, &crop, &bmdst, 0, 0, 0, 0, ctx->flags, csc_type);
+    if(ret != BM_SUCCESS){
+        goto fail;
+    }
     hwdst->padded = 1;
+fail:
     bm_image_destroy(bmsrc);
     bm_image_destroy(bmdst);
     if(handle != NULL){
         bm_dev_free(handle);
     }
-    return 0;
+    if(ret != BM_SUCCESS){
+        av_log(ctx, AV_LOG_ERROR, "bmvpp_copy failed\n");
+    }
+    return ret;
 }
 
 static int bmscale_J422ToJ420_hwaccel(BmScaleContext* ctx, AVFrame* dst, AVFrame* src)
@@ -1278,15 +1349,16 @@ static int bmscale_J422ToJ420_hwaccel(BmScaleContext* ctx, AVFrame* dst, AVFrame
     AVHWFramesContext* dst_frm_ctx = (AVHWFramesContext*)dst->hw_frames_ctx->data;
     AVBmCodecFrame*          hwsrc = (AVBmCodecFrame*)src->data[4];
     AVBmCodecFrame*          hwdst = (AVBmCodecFrame*)dst->data[4];
-    bm_ion_buffer_t*    ion_buffer = (bm_ion_buffer_t*)hwdst->buffer;
+    bm_device_mem_t*    ion_buffer = (bm_device_mem_t*)hwdst->buffer;
+    bm_device_mem_t*    src_buffer = (bm_device_mem_t*)hwsrc->buffer;
     bm_handle_t handle;
-    int dev_id = ion_buffer->soc_idx;
+    int dev_id = ctx->soc_idx;
     int ret = bm_dev_request(&handle, dev_id);
     if (ret != BM_SUCCESS) {
-        printf("Create bm handle failed. ret = %d\n", ret);
+        av_log(ctx, AV_LOG_ERROR, "Create bm handle failed. ret = %d\n", ret);
         return ret;
     }
-    av_log(ctx, AV_LOG_TRACE, "soc_idx %d\n", ion_buffer->soc_idx);
+    av_log(ctx, AV_LOG_TRACE, "soc_idx %d\n", ctx->soc_idx);
     bm_image bmsrc, bmdst;
     bmcv_rect_t crop;
     if (src_frm_ctx->format != AV_PIX_FMT_BMCODEC ||
@@ -1320,69 +1392,37 @@ static int bmscale_J422ToJ420_hwaccel(BmScaleContext* ctx, AVFrame* dst, AVFrame
     av_log(ctx, AV_LOG_TRACE, "dst width : %d\n", dst->width);
     av_log(ctx, AV_LOG_TRACE, "dst height: %d\n", dst->height);
 
-    bm_image_format_ext  s_format = get_format_from_avformat(src_frm_ctx->sw_format);
-    int s_stride[4]   = {hwsrc->linesize[0], hwsrc->linesize[1], hwsrc->linesize[2], hwsrc->linesize[3]};
-    uint64_t s_pa[4]={0};
-    s_pa[0]   = (uint64_t)hwsrc->data[0];
-    s_pa[1]   = (uint64_t)hwsrc->data[1];
-    s_pa[2]   = (uint64_t)hwsrc->data[2];
-    int s_size[4] = {0};
-    s_size[0] = s_stride[0]*src->height;
-    if(s_format == FORMAT_YUV420P || s_format == FORMAT_NV12){
-        s_size[1] = s_stride[1]*src->height/2;
-        s_size[2] = s_stride[2]*src->height/2;
+    ret = bmscale_hw_bmimg_from_avframe(handle, src_frm_ctx, hwsrc, src, &bmsrc, 0);
+    if(ret != BM_SUCCESS){
+        goto fail;
     }
-    else{
-        s_size[1] = s_stride[1]*src->height;
-        s_size[2] = s_stride[2]*src->height;
+    ret = bmscale_hw_bmimg_from_avframe(handle, dst_frm_ctx, hwdst, dst, &bmdst, 0);
+    if(ret != BM_SUCCESS){
+        goto fail;
     }
-    bm_image_create(handle, src->height, src->width, s_format, DATA_TYPE_EXT_1N_BYTE, &bmsrc, s_stride);
-    bm_device_mem_t src_mem[4]={0};
-    for(int i = 0; i < 4; i++){
-       bm_set_device_mem(&src_mem[i], s_size[i], s_pa[i]);
-    }
-    bm_image_attach(bmsrc, src_mem);
-    bm_image_format_ext d_format = get_format_from_avformat(dst_frm_ctx->sw_format);
-    int d_stride[4]   = {hwdst->linesize[0], hwdst->linesize[1], hwdst->linesize[2], hwdst->linesize[3]};
-    uint64_t d_pa[4]={0};
-    d_pa[0]   = (uint64_t)hwdst->data[0];
-    d_pa[1]   = (uint64_t)hwdst->data[1];
-    d_pa[2]   = (uint64_t)hwdst->data[2];
-
-    int d_size[4] = {0};
-    d_size[0] = d_stride[0]*dst->height;
-    if(s_format == FORMAT_YUV420P || s_format == FORMAT_NV12){
-        d_size[1] = d_stride[1]*dst->height/2;
-        d_size[2] = d_stride[2]*dst->height/2;
-    }
-    else{
-        d_size[1] = d_stride[1]*dst->height;
-        d_size[2] = d_stride[2]*dst->height;
-    }
-
-    bm_image_create(handle, dst->height, dst->width, d_format, DATA_TYPE_EXT_1N_BYTE, &bmdst, d_stride);
-    bm_device_mem_t dst_mem[4]={0};
-    for(int i = 0; i < 4; i++){
-        bm_set_device_mem(&dst_mem[i], d_size[i], d_pa[i]);
-    }
-    bm_image_attach(bmdst, dst_mem);
     crop.start_x = 0;
     crop.start_y = 0;
     crop.crop_w = bmsrc.width;
     crop.crop_h = bmsrc.height;
     csc_type_t csc_type;
     ret = bmcv_get_csc_type_by_colorinfo(src->colorspace, src->color_range, bmsrc.data_type, bmdst.data_type, &csc_type);
-    ret = bmvpp_scale_bmcv(handle, bmsrc, &crop, &bmdst, 0, 0, 0, 0, ctx->flags, csc_type);
-    if (ret != 0) {
-        av_log(ctx, AV_LOG_ERROR, "bmvpp_J422ToJ420 failed\n");
-        return AVERROR_EXTERNAL;
+    if(ret != BM_SUCCESS){
+        goto fail;
     }
+    ret = bmvpp_scale_bmcv(handle, bmsrc, &crop, &bmdst, 0, 0, 0, 0, ctx->flags, csc_type);
+    if(ret != BM_SUCCESS){
+        goto fail;
+    }
+fail:
     bm_image_destroy(bmsrc);
     bm_image_destroy(bmdst);
     if(handle != NULL){
         bm_dev_free(handle);
     }
-    return 0;
+    if(ret != BM_SUCCESS){
+        av_log(ctx, AV_LOG_ERROR, "bmscale_J422ToJ420_hwaccel failed\n");
+    }
+    return ret;
 }
 
 static int bmscale_filtering_hwaccel(BmScaleContext* ctx, int opt, AVFrame* dst, AVFrame* src)
@@ -1391,16 +1431,20 @@ static int bmscale_filtering_hwaccel(BmScaleContext* ctx, int opt, AVFrame* dst,
     AVHWFramesContext* dst_frm_ctx = (AVHWFramesContext*)dst->hw_frames_ctx->data;
     AVBmCodecFrame*          hwsrc = (AVBmCodecFrame*)src->data[4];
     AVBmCodecFrame*          hwdst = (AVBmCodecFrame*)dst->data[4];
-    bm_ion_buffer_t*    ion_buffer = (bm_ion_buffer_t*)hwdst->buffer;
+
+    bm_device_mem_t*    ion_buffer = (bm_device_mem_t*)hwdst->buffer;
+    bm_device_mem_t*    src_buffer = (bm_device_mem_t*)hwsrc->buffer;
+
     int                    maptype =  hwsrc->maptype;
+
     bm_handle_t handle;
-    int dev_id = ion_buffer->soc_idx;
+    int dev_id = ctx->soc_idx;
     int ret = bm_dev_request(&handle, dev_id);
     if (ret != BM_SUCCESS) {
-        printf("Create bm handle failed. ret = %d\n", ret);
+        av_log(ctx, AV_LOG_ERROR, "Create bm handle failed. ret = %d\n", ret);
         return ret;
     }
-    av_log(ctx, AV_LOG_TRACE, "soc_idx %d\n", ion_buffer->soc_idx);
+    av_log(ctx, AV_LOG_TRACE, "soc_idx %d\n", dev_id);
     bm_image bmsrc, bmdst;
     bmcv_rect_t crop_rect;
     int i;
@@ -1438,74 +1482,26 @@ static int bmscale_filtering_hwaccel(BmScaleContext* ctx, int opt, AVFrame* dst,
     int s_stride[4]={hwsrc->linesize[0], hwsrc->linesize[1], hwsrc->linesize[2], hwsrc->linesize[3]};
     uint64_t s_pa[4]={0};
     int s_size[4]={0};
-    if (maptype) {
-        s_pa[0]   = (uint64_t)hwsrc->data[2]; // y table
-        s_pa[1]   = (uint64_t)hwsrc->data[0]; // y base
-        s_pa[2]   = (uint64_t)hwsrc->data[3]; // c table
-        s_pa[3]   = (uint64_t)hwsrc->data[1]; // c base
-        s_size[0] = hwsrc->linesize[2];
-        s_size[1] = hwsrc->linesize[0];
-        s_size[2] = hwsrc->linesize[3];
-        s_size[3] = hwsrc->linesize[1];
-        bm_image_create(handle, s_height, s_width, FORMAT_COMPRESSED, DATA_TYPE_EXT_1N_BYTE, &bmsrc, s_stride);
-    } else {
-        for (i=0; i<4; i++){
-            s_pa[i] = (uint64_t)hwsrc->data[i];
-        }
-        s_size[0] = s_stride[0]*src->height;
-        if(s_data_type == FORMAT_YUV420P || s_data_type == FORMAT_NV12){
-            s_size[1] = s_stride[1]*src->height/2;
-            s_size[2] = s_stride[2]*src->height/2;
-        }
-        else{
-            s_size[1] = s_stride[1]*src->height;
-            s_size[2] = s_stride[2]*src->height;
-        }
-        bm_image_create(handle, s_height, s_width, s_data_type, DATA_TYPE_EXT_1N_BYTE, &bmsrc, s_stride);
-    }
-    bm_device_mem_t src_mem[4]={0};
-    for(int i = 0; i < 4; i++){
-        bm_set_device_mem(&src_mem[i], s_size[i], s_pa[i]);
-    }
-    bm_image_attach(bmsrc, src_mem);
-    bm_image_data_format_ext d_data_type = get_format_from_avformat(dst_frm_ctx->sw_format);
 
-    int d_stride[4] = {hwdst->linesize[0], hwdst->linesize[1], hwdst->linesize[2], hwdst->linesize[3]};
-    uint64_t d_pa[4]={0};
-    d_pa[0]   = (uint64_t)hwdst->data[0];
-    d_pa[1]   = (uint64_t)hwdst->data[1];
-    d_pa[2]   = (uint64_t)hwdst->data[2];
-
-    bm_image_create(handle, dst->height, dst->width, d_data_type, DATA_TYPE_EXT_1N_BYTE, &bmdst, d_stride);
-    bm_device_mem_t dst_mem[4] = {0};
-
-    int d_size[4] = {0};
-    d_size[0] = d_stride[0]*dst->height;
-    if(d_data_type == FORMAT_YUV420P || d_data_type == FORMAT_NV12){
-        d_size[1] = d_stride[1]*dst->height/2;
-        d_size[2] = d_stride[2]*dst->height/2;
+    ret = bmscale_hw_bmimg_from_avframe(handle, src_frm_ctx, hwsrc, src, &bmsrc, maptype);
+    if(ret != BM_SUCCESS){
+        goto fail;
     }
-    else{
-        d_size[1] = d_stride[1]*dst->height;
-        d_size[2] = d_stride[2]*dst->height;
+    ret = bmscale_hw_bmimg_from_avframe(handle, dst_frm_ctx, hwdst, dst, &bmdst, 0);
+    if(ret != BM_SUCCESS){
+        goto fail;
     }
-
-    for(int i = 0; i < 4; i++){
-        bm_set_device_mem(&dst_mem[i], d_size[i], d_pa[i]);
-    }
-    bm_image_attach(bmdst, dst_mem);
 
     csc_type_t csc_type;
     ret = bmcv_get_csc_type_by_colorinfo(src->colorspace, src->color_range, bmsrc.data_type, bmdst.data_type, &csc_type);
+    if(ret != BM_SUCCESS){
+        goto fail;
+    }
 
     if (opt == BMSCALE_OPT_CROP) {
         bmcv_rect_t rect;
         bmscale_get_auto_crop(ctx, src, dst, &rect);
         ret = bmvpp_scale_bmcv(handle, bmsrc, &rect, &bmdst, 0, 0, 0, 0, ctx->flags, csc_type);
-        if (ret != 0) {
-            av_log(ctx, AV_LOG_ERROR, "bmvpp_crop failed\n");
-            return AVERROR_EXTERNAL;
-        }
     } else if (opt == BMSCALE_OPT_PAD) {
         int top = 0, bottom = 0, left = 0, right = 0;
         bmscale_get_auto_pad(ctx, src, dst, &top, &bottom, &left, &right);
@@ -1513,24 +1509,19 @@ static int bmscale_filtering_hwaccel(BmScaleContext* ctx, int opt, AVFrame* dst,
                "pad: <left:%d, right:%d, top:%d, bottom:%d>, width:%d, height:%d\n",
                left, right, top, bottom, bmdst.width-left-right, bmdst.height-top-bottom);
         ret = bmvpp_scale_bmcv(handle, bmsrc, &crop_rect, &bmdst, left, top, right, bottom, ctx->flags, csc_type);
-        if (ret != 0) {
-            av_log(ctx, AV_LOG_ERROR, "bmvpp_pad failed\n");
-            return AVERROR_EXTERNAL;
-        }
     } else {
         ret = bmvpp_scale_bmcv(handle, bmsrc, &crop_rect, &bmdst, 0, 0, 0, 0, ctx->flags, csc_type);
-
-        if (ret != 0) {
-            av_log(ctx, AV_LOG_ERROR, "bmvpp_scale failed\n");
-            return AVERROR_EXTERNAL;
-        }
     }
+fail:
     bm_image_destroy(bmsrc);
     bm_image_destroy(bmdst);
     if(handle != NULL){
         bm_dev_free(handle);
     }
-    return 0;
+    if(ret != BM_SUCCESS){
+        av_log(ctx, AV_LOG_ERROR, "bmscale_filtering_hwaccel failed\n");
+    }
+    return ret;
 }
 
 static int bmscale_filter_frame_hwaccel(AVFilterLink *link, AVFrame *in_frame)
@@ -1675,7 +1666,7 @@ static int bmscale_filter_frame_hwaccel(AVFilterLink *link, AVFrame *in_frame)
 
     av_log(s, AV_LOG_TRACE, "[%s,%d] leave\n", __func__, __LINE__);
     return ff_filter_frame(outlink, out_frame);
-    fail:
+fail:
     av_frame_free(&in_frame);
     av_frame_free(&out_frame);
     return ret;
@@ -1708,28 +1699,61 @@ static void fill_black_frame(AVFrame * frame)
         memset(frame->data[2], 0x80, frame->linesize[2] * frame->height);
     }
     else {
-        printf("ERROR:fill_back_frame() not support format=%s\n", av_get_pix_fmt_name(frame->format));
+        av_log(NULL, AV_LOG_ERROR, "ERROR:fill_back_frame() not support format=%s\n", av_get_pix_fmt_name(frame->format));
     }
 }
 
+static int bmscale_avimage_fill_arrays(uint8_t *dst_data[4], int dst_linesize[4],
+                         const uint8_t *src, enum AVPixelFormat pix_fmt,
+                         int width, int height, int align)
+{
+    int ret, i;
+
+    ret = av_image_check_size(width, height, 0, NULL);
+    if (ret < 0)
+        return ret;
+
+    ret = av_image_fill_linesizes(dst_linesize, pix_fmt, width);
+    if (ret < 0)
+        return ret;
+
+    switch (pix_fmt) {
+    case AV_PIX_FMT_YUV420P:
+    case AV_PIX_FMT_YUVJ420P:
+    case AV_PIX_FMT_YUV422P:
+    case AV_PIX_FMT_YUVJ422P:
+        dst_linesize[1] = FFALIGN(dst_linesize[1], align);
+        dst_linesize[0] = dst_linesize[1] * 2;
+        dst_linesize[2] = dst_linesize[1];
+        break;
+    default:
+        for (i = 0; i < 4; i++)
+            dst_linesize[i] = FFALIGN(dst_linesize[i], align);
+        break;
+    }
+
+    return av_image_fill_pointers(dst_data, pix_fmt, height, (uint8_t *)src, dst_linesize);
+}
 
 static int bmscale_avframe_get_buffer(BmScaleContext *ctx, AVFrame* frame, int opt)
 {
     int ret = 0;
     int total_buffer_size = 0;
+
     struct bmscale_avbuffer_ctx_s *hwpic = bmscale_buffer_pool_alloc(ctx, frame->format, frame->width, frame->height);
     if (NULL == hwpic) return -1;
     // fill system memory pointers
-    av_image_fill_arrays(frame->data, frame->linesize, hwpic->vaddr, frame->format, frame->width, frame->height, BM_STRIDE_ALIGN);
-    av_image_fill_arrays(&frame->data[4], &frame->linesize[4], (void*)hwpic->ion_buff->paddr, frame->format, frame->width, frame->height, BM_STRIDE_ALIGN);
+    bmscale_avimage_fill_arrays(frame->data, frame->linesize, hwpic->vaddr, frame->format, frame->width, frame->height, ctx->stride_align);
+    bmscale_avimage_fill_arrays(&frame->data[4], &frame->linesize[4], (void*)hwpic->ion_buff->u.device.device_addr, frame->format, frame->width, frame->height, ctx->stride_align);
 
     // fill black background,it's important.
     if (BMSCALE_OPT_PAD == opt && hwpic->black_filled == 0) {
         fill_black_frame(frame);
         // upload data to device memory.
-        ret = bm_ion_upload_data(hwpic->vaddr, hwpic->ion_buff, hwpic->ion_buff->size);
+        ret = bm_memcpy_s2d(ctx->handle, *(hwpic->ion_buff), hwpic->vaddr);
+        //ret = bm_ion_upload_data(hwpic->vaddr, hwpic->ion_buff, hwpic->ion_buff->size);
         if (ret != 0) {
-            av_log(ctx, AV_LOG_ERROR, "[%s, %d] bm_ion_upload_data failed!\n", __FILE__, __LINE__);
+            av_log(ctx, AV_LOG_ERROR, "[%s, %d] bm_memcpy_s2d failed!\n", __FILE__, __LINE__);
         }
 
         hwpic->black_filled = 1;
@@ -1751,13 +1775,15 @@ static int bmscale_avframe_download(BmScaleContext *ctx, AVFrame *frame)
 {
     int ret = 0;
     AVBufferRef *ref = frame->buf[0];
+    BmScaleContext *ctx_tmp = ctx;
+
     if (ref != NULL){
         struct bmscale_avbuffer_ctx_s *ctx=(struct bmscale_avbuffer_ctx_s*)av_buffer_get_opaque(ref);
-        if (ctx->vaddr != ctx->ion_buff->vaddr) {
+        if (ctx->vaddr != ctx->ion_buff->u.system.system_addr) {
             //d2s
-            ret = bm_ion_download_data(ctx->vaddr, ctx->ion_buff, ctx->ion_buff->size);
+            ret = bm_memcpy_d2s(ctx_tmp->handle, ctx->vaddr, *(ctx->ion_buff));
             if (ret != 0) {
-                av_log(ctx, AV_LOG_ERROR, "bm_ion_download_data error!\n");
+                av_log(ctx_tmp, AV_LOG_ERROR, "bm_memcpy_d2s error! 1787\n");
                 return ret;
             }
         }else{
@@ -1873,7 +1899,7 @@ static int bmscale_bmimg_from_avframe(bm_handle_t handle, BmScaleContext *ctx, A
         if (is_compressed) *is_compressed = 0;
         bm_image_create(handle, height, width, format, DATA_TYPE_EXT_1N_BYTE, bmsrc, stride);
         // frame on normal system memory, alloc memory from ion for color convertion.
-        if (bm_image_alloc_dev_mem(bmsrc[0], BMCV_HEAP_ANY) != BM_SUCCESS) {
+        if (bm_image_alloc_dev_mem_heap_mask(bmsrc[0], HEAP_MASK_1_2) != BM_SUCCESS) {
             av_log(ctx, AV_LOG_ERROR, "bm_image_alloc() err!\n");
             return -1;
         }
@@ -1887,24 +1913,6 @@ static int bmscale_bmimg_from_avframe(bm_handle_t handle, BmScaleContext *ctx, A
         //TODO
     return 0;
 }
-
-static void bmscale_free_ion_buffer(bm_ion_buffer_t *ion_bufs[], int num)
-{
-    for(int i = 0;i < num; i++) {
-        if (ion_bufs[i] != NULL) {
-            bm_ion_free_buffer(ion_bufs[i]);
-        }
-    }
-}
-
-// static struct bmscale_csc_table_s* bmscale_find_csc_table(int src_format, int dst_format) {
-//     struct bmscale_csc_table_s key={0};
-//     key.src_format = src_format;
-//     key.dst_format = dst_format;
-
-//     return bsearch(&key, g_convert_table, FF_ARRAY_ELEMS(g_convert_table), sizeof(g_convert_table[0]),
-//                    bmscale_csc_table_key_compare);
-// }
 
 static int bmscale_is_support(struct bmscale_csc_table_s *item, int src_format, int dst_format, int need_scaled, int opt)
 {
@@ -1930,24 +1938,29 @@ static int bmscale_filtering(BmScaleContext* ctx, int opt, AVFrame *src, AVFrame
     int dev_id = ctx->soc_idx;
     int ret = bm_dev_request(&handle, dev_id);
     if (ret != BM_SUCCESS) {
-        printf("Create bm handle failed. ret = %d\n", ret);
+        av_log(ctx, AV_LOG_ERROR, "Create bm handle failed. ret = %d\n", ret);
         return ret;
     }
     int is_compressed_nv12 = 0;
     ret = bmscale_avframe_get_buffer(ctx, dst, opt);
-    if (ret != 0) {
+    if (ret != BM_SUCCESS) {
         av_log(ctx, AV_LOG_ERROR, "bmscale_avframe_get_buffer() failed!\n");
+        if(handle != NULL){
+            bm_dev_free(handle);
+        }
         return ret;
     }
     bm_image bmcv_s;
     bm_image bmcv_d;
     memset(&bmcv_s, 0, sizeof(bmcv_s));
     memset(&bmcv_s, 0, sizeof(bmcv_s));
-    bmscale_bmimg_from_avframe(handle, ctx, src, &bmcv_s, &is_compressed_nv12);
-    bmscale_bmimg_from_avframe(handle, ctx, dst, &bmcv_d, NULL);
-    if (ret != 0) {
-        av_log(ctx, AV_LOG_ERROR, "bm_scale failed!\n");
-        return ret;
+    ret = bmscale_bmimg_from_avframe(handle, ctx, src, &bmcv_s, &is_compressed_nv12);
+    if (ret != BM_SUCCESS) {
+        goto fail;
+    }
+    ret = bmscale_bmimg_from_avframe(handle, ctx, dst, &bmcv_d, NULL);
+    if (ret != BM_SUCCESS) {
+        goto fail;
     }
     bmcv_rect_t rect;
     rect.start_x = 0;
@@ -1957,7 +1970,9 @@ static int bmscale_filtering(BmScaleContext* ctx, int opt, AVFrame *src, AVFrame
     int scale_done = 0;
     csc_type_t csc_type;
     ret = bmcv_get_csc_type_by_colorinfo(src->colorspace, src->color_range, bmcv_s.data_type, bmcv_d.data_type, &csc_type);
-
+    if (ret != BM_SUCCESS) {
+        goto fail;
+    }
     if (BMSCALE_OPT_SCALE == opt && !scale_done) {
         ret = bmvpp_scale_bmcv(handle, bmcv_s, &rect, &bmcv_d, 0, 0, 0, 0, ctx->flags, csc_type);
     }else if (BMSCALE_OPT_CROP == opt) {
@@ -1969,15 +1984,15 @@ static int bmscale_filtering(BmScaleContext* ctx, int opt, AVFrame *src, AVFrame
         bmscale_get_auto_pad(ctx, src, dst, &top, &bottom, &left, &right);
         ret = bmvpp_scale_bmcv(handle, bmcv_s, &rect, &bmcv_d, left, top, right, bottom, ctx->flags, csc_type);
     }
-
-    if (ret != 0) {
-        av_log(ctx, AV_LOG_ERROR, "bm_scale failed!\n");
-        return ret;
-    }
+fail:
     bm_image_destroy(bmcv_s);
     bm_image_destroy(bmcv_d);
     if(handle != NULL){
         bm_dev_free(handle);
+    }
+    if(ret != BM_SUCCESS){
+        av_log(ctx, AV_LOG_ERROR, "bmscale_filtering failed!\n");
+        return ret;
     }
     return (ctx->zero_copy ? 0:bmscale_avframe_download(ctx, dst));
 }
@@ -2029,7 +2044,7 @@ static int bmscale_filter_frame(AVFilterLink *link, AVFrame *in_frame)
 
     av_log(s, AV_LOG_TRACE, "[%s,%d] leave\n", __func__, __LINE__);
     return ff_filter_frame(outlink, out_frame);
-    fail:
+fail:
     av_frame_free(&in_frame);
     av_frame_free(&out_frame);
     return ret;

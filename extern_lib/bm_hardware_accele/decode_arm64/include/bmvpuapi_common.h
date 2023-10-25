@@ -1,28 +1,14 @@
-/* bmvpuapi API library for the BitMain Sophon SoC
+/*****************************************************************************
  *
- * Copyright (C) 2018 Solan Shang
- * Copyright (C) 2015 Carlos Rafael Giani
+ *    Copyright (C) 2022 Sophgo Technologies Inc.  All rights reserved.
  *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
+ *    bmvid is licensed under the 2-Clause BSD License except for the
+ *    third-party components.
  *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301
- * USA
- */
-
+ *****************************************************************************/
 /* This library provides a high-level interface for controlling the BitMain
  * Sophon VPU en/decoder.
  */
-
 
 #ifndef __BMVPUAPI_COMMON_H__
 #define __BMVPUAPI_COMMON_H__
@@ -31,9 +17,10 @@
 #include <stdint.h>
 
 #if defined(_WIN32) || defined(WIN32) || defined(__WIN32__)
-#define ATTRIBUTE 
+#define ATTRIBUTE
 #define DECL_EXPORT __declspec(dllexport)
 #define DECL_IMPORT __declspec(dllimport)
+#include <stdbool.h>
 #else
 #define ATTRIBUTE __attribute__((deprecated))
 #define DECL_EXPORT
@@ -43,6 +30,8 @@
 extern "C" {
 #endif
 
+/* for using bmlib */
+#include "bmlib_runtime.h"
 
 /**************************************************/
 /******* ALLOCATOR STRUCTURES AND FUNCTIONS *******/
@@ -53,7 +42,7 @@ extern "C" {
 typedef unsigned long bmvpu_phys_addr_t;
 #elif _WIN32
 typedef unsigned long long bmvpu_phys_addr_t;
-#endif 
+#endif
 
 /* BmVpuAllocationFlags: flags for the BmVpuDMABufferAllocator's allocate vfunc */
 typedef enum
@@ -76,149 +65,6 @@ typedef enum
     /* Map memory for CPU read access */
     BM_VPU_MAPPING_FLAG_READ    = (1UL << 1)
 } BmVpuMappingFlags;
-
-
-typedef struct _BmVpuDMABuffer BmVpuDMABuffer;
-typedef struct _BmVpuWrappedDMABuffer BmVpuWrappedDMABuffer;
-DECL_EXPORT typedef struct _BmVpuDMABufferAllocator BmVpuDMABufferAllocator;
-
-/* BmVpuDMABufferAllocator:
- *
- * This structure contains function pointers which define an allocator for DMA buffers
- * (= physically contiguous memory blocks). It is possible to define a custom allocator,
- * which is useful for tracing memory allocations, and for hooking up any existing allocation mechanisms,
- * such as ION or CMA.
- *
- * Older allocators like the VPU ones unfortunately work with physical addresses directly, and do not support
- * DMA-BUF or the like. To keep compatible with these older allocators and allowing for newer and better
- * methods, both physical addresses and FDs are supported by this API. Typically, an allocator allows for
- * one of them. If an allocator does not support FDs, get_fd() must return -1. If it does not support physical
- * addresses, then the physical address returned by get_physical_address() must be 0.
- *
- * The pointers are:
- *
- * allocate():
- *   Allocates a DMA buffer. "size" is the size of the buffer in bytes. "alignment" is the address
- *   alignment in bytes. An alignment of 1 or 0 means that no alignment is required.
- *   "flags" is a bitwise OR combination of flags (or 0 if no flags are used, in which case
- *   cached pages are used by default). See BmVpuAllocationFlags for a list of valid flags.
- *   If allocation fails, NULL is returned.
- *
- * deallocate():
- *   Deallocates a DMA buffer. The buffer must have been allocated with the same allocator.
- *
- * map():
- *   Maps a DMA buffer to the local address space, and returns the virtual address to this space.
- *   "flags" is a bitwise OR combination of flags (or 0 if no flags are used, in which case it will map
- *   in regular read/write mode). See BmVpuMappingFlags for a list of valid flags.
- *
- * unmap():
- *   Unmaps a DMA buffer. If the buffer isn't currently mapped, this function does nothing.
- *
- * get_fd():
- *   Gets the file descriptor associated with the DMA buffer. This is the preferred way of interacting
- *   with DMA buffers. If the underlying allocator does not support FDs, this function returns -1.
- *
- * get_physical_address():
- *   Gets the physical address associated with the DMA buffer. This address points to the
- *   start of the buffer in the physical address space. If no physical addresses are
- *   supported by the allocator, this function returns 0.
- *
- * get_size():
- *   Returns the size of the buffer, in bytes.
- *
- * The pointers get_fd(), get_physical_address(), and get_size() can also be used while the buffer is mapped. */
-struct _BmVpuDMABufferAllocator
-{
-    BmVpuDMABuffer* (*allocate)(BmVpuDMABufferAllocator *allocator, int soc_idx, size_t size, unsigned int alignment, unsigned int flags);
-    void (*deallocate)(BmVpuDMABufferAllocator *allocator, BmVpuDMABuffer *buffer);
-
-    uint8_t* (*map)(BmVpuDMABufferAllocator *allocator, BmVpuDMABuffer *buffer, unsigned int flags);
-    void (*unmap)(BmVpuDMABufferAllocator *allocator, BmVpuDMABuffer *buffer);
-
-    int (*get_fd)(BmVpuDMABufferAllocator *allocator, BmVpuDMABuffer *buffer);
-    bmvpu_phys_addr_t (*get_physical_address)(BmVpuDMABufferAllocator *allocator, BmVpuDMABuffer *buffer);
-
-    size_t (*get_size)(BmVpuDMABufferAllocator *allocator, BmVpuDMABuffer *buffer);
-
-    int (*flush)(BmVpuDMABufferAllocator *allocator, BmVpuDMABuffer *buffer);
-    int (*invalidate)(BmVpuDMABufferAllocator *allocator, BmVpuDMABuffer *buffer);
-};
-
-
-/* BmVpuDMABuffer:
- *
- * Opaque object containing a DMA buffer. Its structure is defined by the allocator which created the object. */
-struct _BmVpuDMABuffer
-{
-    BmVpuDMABufferAllocator *allocator;
-};
-
-
-/* BmVpuWrappedDMABuffer:
- *
- * Structure for wrapping existing DMA buffers.
- * This is useful for interfacing with existing buffers that were not allocated by bmvpuapi.
- *
- * fd, physical_address, and size are filled with user-defined values. If the DMA buffer is referred to
- * by a file descriptor, then fd must be set to the descriptor value, otherwise fd must be set to -1.
- * If the buffer is referred to by a physical address, then physical_address must be set to that address,
- * otherwise physical_address must be 0.
- * map_func and unmap_func are used in the bmvpu_dma_buffer_map() / bmvpu_dma_buffer_unmap() calls.
- * If these function pointers are NULL, no mapping will be done. NOTE: bmvpu_dma_buffer_map() will return
- * a NULL pointer in this case.
- */
-struct _BmVpuWrappedDMABuffer
-{
-    BmVpuDMABuffer parent;
-
-    uint8_t* (*map)(BmVpuWrappedDMABuffer *wrapped_dma_buffer, unsigned int flags);
-    void (*unmap)(BmVpuWrappedDMABuffer *wrapped_dma_buffer);
-
-    int fd;
-    bmvpu_phys_addr_t physical_address;
-    size_t size;
-};
-
-
-/* Convenience functions which call the corresponding function pointers in the allocator */
-DECL_EXPORT BmVpuDMABuffer* bmvpu_dma_buffer_allocate(BmVpuDMABufferAllocator *allocator, int soc_idx, size_t size,
-                                          unsigned int alignment, unsigned int flags);
-DECL_EXPORT void bmvpu_dma_buffer_deallocate(BmVpuDMABuffer *buffer);
-DECL_EXPORT uint8_t* bmvpu_dma_buffer_map(BmVpuDMABuffer *buffer, unsigned int flags);
-DECL_EXPORT void bmvpu_dma_buffer_unmap(BmVpuDMABuffer *buffer);
-int bmvpu_dma_buffer_get_fd(BmVpuDMABuffer *buffer);
-DECL_EXPORT bmvpu_phys_addr_t bmvpu_dma_buffer_get_physical_address(BmVpuDMABuffer *buffer);
-size_t bmvpu_dma_buffer_get_size(BmVpuDMABuffer *buffer);
-DECL_EXPORT int bmvpu_dma_buffer_flush(BmVpuDMABuffer *buffer);
-int bmvpu_dma_buffer_invalidate(BmVpuDMABuffer *buffer);
-
-/* Convenience predefined allocator for allocating DMA buffers. */
-DECL_EXPORT BmVpuDMABufferAllocator* bmvpu_get_default_allocator(void);
-
-/* Call for initializing wrapped DMA buffer structures.
- * Always call this before further using such a structure. */
-DECL_EXPORT void bmvpu_init_wrapped_dma_buffer(BmVpuWrappedDMABuffer *buffer);
-
-
-/* Heap allocation function for virtual memory blocks internally allocated by bmvpuapi.
- * These have nothing to do with the DMA buffer allocation interface defined above.
- * By default, malloc/free are used. */
-typedef void* (*BmVpuHeapAllocFunc)(size_t const size, void *context,
-                                    char const *file, int const line, char const *fn);
-typedef void  (*BmVpuHeapFreeFunc)(void *memblock, size_t const size, void *context,
-                                   char const *file, int const line, char const *fn);
-/* This function allows for setting custom heap allocators, which are used to create internal heap blocks.
- * The heap allocator referred to by "heap_alloc_fn" must return NULL if allocation fails.
- * "context" is a user-defined value, which is passed on unchanged to the allocator functions.
- * Calling this function with either "heap_alloc_fn" or "heap_free_fn" set to NULL resets the internal
- * pointers to use malloc and free (the default allocators). */
-void bmvpu_set_heap_allocator_functions(BmVpuHeapAllocFunc heap_alloc_fn,
-                                        BmVpuHeapFreeFunc heap_free_fn,
-                                        void *context);
-
-
-
 
 /***********************/
 /******* LOGGING *******/
@@ -308,7 +154,7 @@ typedef enum
 typedef struct
 {
     /* DMA buffer which contains the pixels. */
-    BmVpuDMABuffer *dma_buffer;
+    bm_device_mem_t *dma_buffer;
 
     /* Make sure each framebuffer has an ID that is different
      * to the IDs of each other */
@@ -452,7 +298,7 @@ DECL_EXPORT int bmvpu_calc_framebuffer_sizes(int mapType, BmVpuColorFormat color
  */
 DECL_EXPORT int bmvpu_fill_framebuffer_params(BmVpuFramebuffer *framebuffer,
                                    BmVpuFbInfo *fb_info,
-                                   BmVpuDMABuffer *fb_dma_buffer,
+                                   bm_device_mem_t *fb_dma_buffer,
                                    int fb_id, void* context);
 
 /**
@@ -463,10 +309,30 @@ DECL_EXPORT int bmvpu_fill_framebuffer_params(BmVpuFramebuffer *framebuffer,
  *   -1, failed
  *    0, done
  */
-DECL_EXPORT int bmvpu_upload_data(int vpu_core_idx,
+DECL_EXPORT int bmvpu_upload_data(int soc_idx,
                       const uint8_t* host_va, int host_stride,
                       uint64_t vpu_pa, int vpu_stride,
                       int width, int height);
+
+/**
+ * Alloc device memory according to the specified heap_id_mask.
+ * if high_bit_first is 1, high bit in heap_id_mask will be considered.
+ * The interface will consider heap_num for different device.
+ * For example,
+ * ----------------------------------------------------------------
+ *      heap_id_mask    high_bit_first           priority
+ * ----------------------------------------------------------------
+ *    0x07 (0000 0110)         1          heap2(vpu) > heap1(vpp)
+ *    0x07 (0000 0110)         0          heap1(vpp) > heap2(vpu)
+ * ----------------------------------------------------------------
+ *
+ * return value:
+ *   -1, failed
+ *    0, done
+ */
+DECL_EXPORT int bmvpu_malloc_device_byte_heap(bm_handle_t handle,
+                      bm_device_mem_t *pmem, unsigned int size,
+                      int heap_id_mask, int high_bit_first);
 
 /**
  * Download data from a VPU core to HOST.
@@ -476,7 +342,7 @@ DECL_EXPORT int bmvpu_upload_data(int vpu_core_idx,
  *   -1, failed
  *    0, done
  */
-int bmvpu_download_data(int vpu_core_idx,
+int bmvpu_download_data(int soc_idx,
                         uint8_t* host_va, int host_stride,
                         uint64_t vpu_pa, int vpu_stride,
                         int width, int height);

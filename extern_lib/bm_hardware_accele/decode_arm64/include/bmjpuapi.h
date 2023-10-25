@@ -23,7 +23,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
-
+#include <stdbool.h>
+#include "bmlib_runtime.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -94,140 +95,6 @@ typedef enum
 }
 BmJpuMappingFlags;
 
-
-typedef struct _BmJpuDMABuffer BmJpuDMABuffer;
-typedef struct _BmJpuWrappedDMABuffer BmJpuWrappedDMABuffer;
-typedef struct _BmJpuDMABufferAllocator BmJpuDMABufferAllocator;
-
-/* BmJpuDMABufferAllocator:
- *
- * This structure contains function pointers (referred to as "vfuncs") which define an allocator for
- * DMA buffers (= physically contiguous memory blocks). It is possible to define a custom allocator,
- * which is useful for tracing memory allocations, and for hooking up any existing allocation mechanisms,
- * such as ION or CMA.
- *
- * Older allocators like the JPU ones unfortunately work with physical addresses directly, and do not support
- * DMA-BUF or the like. To keep compatible with these older allocators and allowing for newer and better
- * methods, both physical addresses and FDs are supported by this API. Typically, an allocator allows for
- * one of them. If an allocator does not support FDs, get_fd() must return -1. If it does not support physical
- * addresses, then the physical address returned by get_physical_address() must be 0.
- *
- * The vfuncs are:
- *
- * allocate(): Allocates a DMA buffer. "size" is the size of the buffer in bytes. "alignment" is the address
- *             alignment in bytes. An alignment of 1 or 0 means that no alignment is required.
- *             "flags" is a bitwise OR combination of flags (or 0 if no flags are used, in which case
- *             cached pages are used by default). See BmJpuAllocationFlags for a list of valid flags.
- *             If allocation fails, NULL is returned.
- *
- * deallocate(): Deallocates a DMA buffer. The buffer must have been allocated with the same allocator.
- *
- * map(): Maps a DMA buffer to the local address space, and returns the virtual address to this space.
- *        "flags" is a bitwise OR combination of flags (or 0 if no flags are used, in which case it will map
- *        in regular read/write mode). See BmJpuMappingFlags for a list of valid flags.
- *
- * unmap(): Unmaps a DMA buffer. If the buffer isn't currently mapped, this function does nothing.
- *
- * get_fd(): Gets the file descriptor associated with the DMA buffer. This is the preferred way of interacting
- *           with DMA buffers. If the underlying allocator does not support FDs, this function returns -1.
- *
- * get_physical_address(): Gets the physical address associated with the DMA buffer. This address points to the
- *                         start of the buffer in the physical address space. If no physical addresses are
- *                         supported by the allocator, this function returns 0.
- *
- * get_size(): Returns the size of the buffer, in bytes.
- *
- * The vfuncs get_fd(), get_physical_address(), and get_size() can also be used while the buffer is mapped. */
-struct _BmJpuDMABufferAllocator
-{
-    BmJpuDMABuffer* (*allocate)(BmJpuDMABufferAllocator *allocator, size_t size, unsigned int alignment,
-                                                unsigned int flags, int device_index);
-    void (*deallocate)(BmJpuDMABufferAllocator *allocator, BmJpuDMABuffer *buffer);
-
-    uint8_t* (*map)(BmJpuDMABufferAllocator *allocator, BmJpuDMABuffer *buffer, unsigned int flags);
-    void (*unmap)(BmJpuDMABufferAllocator *allocator, BmJpuDMABuffer *buffer);
-
-    int (*get_fd)(BmJpuDMABufferAllocator *allocator, BmJpuDMABuffer *buffer);
-    bm_jpu_phys_addr_t (*get_physical_address)(BmJpuDMABufferAllocator *allocator, BmJpuDMABuffer *buffer);
-
-    size_t (*get_size)(BmJpuDMABufferAllocator *allocator, BmJpuDMABuffer *buffer);
-
-    int (*invalidate)(BmJpuDMABufferAllocator *allocator, BmJpuDMABuffer *buffer);
-    int (*flush)(BmJpuDMABufferAllocator *allocator, BmJpuDMABuffer *buffer);
-
-    int (*download_data)(BmJpuDMABufferAllocator *allocator, BmJpuDMABuffer *buffer, uint8_t *dst_data, size_t size);
-    int (*upload_data)(BmJpuDMABufferAllocator *allocator, BmJpuDMABuffer *buffer, uint8_t *src_data, size_t size);
-};
-
-/* BmJpuDMABuffer:
- *
- * Opaque object containing a DMA buffer. Its structure is defined by the allocator which created the object. */
-struct _BmJpuDMABuffer
-{
-    BmJpuDMABufferAllocator *allocator;
-};
-
-
-/* BmJpuWrappedDMABuffer:
- *
- * Structure for wrapping existing DMA buffers. This is useful for interfacing with existing buffers
- * that were not allocated by bmjpuapi.
- *
- * fd, physical_address, and size are filled with user-defined values. If the DMA buffer is referred to
- * by a file descriptor, then fd must be set to the descriptor value, otherwise fd must be set to -1.
- * If the buffer is referred to by a physical address, then physical_address must be set to that address,
- * otherwise physical_address must be 0.
- * map_func and unmap_func are used in the bm_jpu_dma_buffer_map() / bm_jpu_dma_buffer_unmap() calls.
- * If these function pointers are NULL, no mapping will be done. NOTE: bm_jpu_dma_buffer_map() will return
- * a NULL pointer in this case.
- */
-struct _BmJpuWrappedDMABuffer
-{
-    BmJpuDMABuffer parent;
-
-    uint8_t* (*map)(BmJpuWrappedDMABuffer *wrapped_dma_buffer, unsigned int flags);
-    void (*unmap)(BmJpuWrappedDMABuffer *wrapped_dma_buffer);
-
-    int (*invalidate)(BmJpuWrappedDMABuffer *wrapped_dma_buffer);
-    int (*flush)(BmJpuWrappedDMABuffer *wrapped_dma_buffer);
-
-    int fd;
-    bm_jpu_phys_addr_t physical_address;
-    size_t size;
-
-    /* User-defined pointer. The library does not touch this value. */
-    void* context;
-};
-
-
-/* Convenience functions which call the corresponding vfuncs in the allocator */
-DECL_EXPORT BmJpuDMABuffer* bm_jpu_dma_buffer_allocate(BmJpuDMABufferAllocator *allocator, size_t size,
-                     unsigned int alignment, unsigned int flags, int device_index);
-DECL_EXPORT void bm_jpu_dma_buffer_deallocate(BmJpuDMABuffer *buffer);
-DECL_EXPORT uint8_t* bm_jpu_dma_buffer_map(BmJpuDMABuffer *buffer, unsigned int flags);
-DECL_EXPORT void bm_jpu_dma_buffer_unmap(BmJpuDMABuffer *buffer);
-DECL_EXPORT int bm_jpu_dma_buffer_get_fd(BmJpuDMABuffer *buffer);
-DECL_EXPORT bm_jpu_phys_addr_t bm_jpu_dma_buffer_get_physical_address(BmJpuDMABuffer *buffer);
-DECL_EXPORT size_t bm_jpu_dma_buffer_get_size(BmJpuDMABuffer *buffer);
-DECL_EXPORT int bm_jpu_dma_buffer_invalidate(BmJpuDMABuffer *buffer);
-DECL_EXPORT int bm_jpu_dma_buffer_flush(BmJpuDMABuffer * buffer);
-
-/* Copy data from device mem to host mem */
-DECL_EXPORT int bm_jpu_dma_buffer_download_data(BmJpuDMABuffer *buffer, uint8_t *dst_data, size_t size);
-
-/* Copy data from host mem to device mem */
-DECL_EXPORT int bm_jpu_dma_buffer_upload_data(BmJpuDMABuffer *buffer, uint8_t *src_data, size_t size);
-
-#ifdef USE_ION_MEMORY
-DECL_EXPORT BmJpuDMABufferAllocator* bm_jpu_get_ion_allocator(void);
-#else
-DECL_EXPORT BmJpuDMABufferAllocator* bm_jpu_get_default_allocator(void);
-#endif
-
-
-/* Call for initializing wrapped DMA buffer structures.
- * Always call this before further using such a structure. */
-DECL_EXPORT void bm_jpu_init_wrapped_dma_buffer(BmJpuWrappedDMABuffer *buffer);
 
 
 /* Heap allocation function for virtual memory blocks internally allocated by bmjpuapi.
@@ -314,7 +181,7 @@ typedef struct
     unsigned int cbcr_stride;
 
     /* DMA buffer which contains the pixels. */
-    BmJpuDMABuffer *dma_buffer;
+    bm_device_mem_t *dma_buffer;
 
     /* These define the starting offsets of each component
      * relative to the start of the buffer. Specified in bytes.
@@ -684,6 +551,9 @@ typedef struct
     int roiHeight;
     int roiOffsetX;
     int roiOffsetY;
+
+    int framebuffer_recycle;
+    size_t framebuffer_size;
 }
 BmJpuDecOpenParams;
 
@@ -735,7 +605,7 @@ DECL_EXPORT BmJpuDecReturnCodes bm_jpu_calc_framebuffer_sizes(BmJpuColorFormat c
  * The specified DMA buffer and context pointer are also set. */
 DECL_EXPORT BmJpuDecReturnCodes bm_jpu_fill_framebuffer_params(BmJpuFramebuffer *framebuffer,
                                     BmJpuFramebufferSizes *calculated_sizes,
-                                    BmJpuDMABuffer *fb_dma_buffer,
+                                    bm_device_mem_t *fb_dma_buffer,
                                     void* context);
 
 /* Returns a human-readable description of the given color format. Useful for logging. */
@@ -769,9 +639,7 @@ DECL_EXPORT char const * bm_jpu_dec_error_string(BmJpuDecReturnCodes code);
  * have been finished. This includes opening/decoding decoder instances. */
 DECL_EXPORT BmJpuDecReturnCodes bm_jpu_dec_load(int device_index);
 DECL_EXPORT BmJpuDecReturnCodes bm_jpu_dec_unload(int device_index);
-
-/* Convenience predefined allocator for allocating DMA buffers. */
-DECL_EXPORT BmJpuDMABufferAllocator* bm_jpu_dec_get_default_allocator(void);
+DECL_EXPORT bm_handle_t bm_jpu_get_handle(int device_index);
 
 /* Called before bm_jpu_dec_open(), it returns the alignment and size for the
  * physical memory block necessary for the decoder's bitstream buffer. The user
@@ -785,18 +653,12 @@ DECL_EXPORT void bm_jpu_dec_get_bitstream_buffer_info(size_t *size, unsigned int
  * that bm_jpu_dec_get_bitstream_buffer_info() specifies (it can also be larger, but must
  * not be smaller than the size this function gives). */
 DECL_EXPORT BmJpuDecReturnCodes bm_jpu_dec_open(BmJpuDecoder **decoder, BmJpuDecOpenParams *open_params,
-                                    BmJpuDMABuffer *bitstream_buffer,
+                                    bm_device_mem_t *bitstream_buffer,
                                     bm_jpu_dec_new_initial_info_callback new_initial_info_callback,
                                     void *callback_user_data);
 
 /* Closes a decoder instance. Trying to close the same instance multiple times results in undefined behavior. */
 DECL_EXPORT BmJpuDecReturnCodes bm_jpu_dec_close(BmJpuDecoder *decoder);
-
-/* Returns the bitstream buffer that is used by the decoder */
-DECL_EXPORT BmJpuDMABuffer* bm_jpu_dec_get_bitstream_buffer(BmJpuDecoder *decoder);
-
-/*  Set the bitstream buffer, used to sync up with jpeg->bitstream_buffer */
-DECL_EXPORT BmJpuDecReturnCodes bm_jpu_dec_set_bitstream_buffer(BmJpuDecoder *decoder,  BmJpuDMABuffer *bitstream_buffer);
 
 /* Flushes the decoder. Any internal undecoded or queued frames are discarded. */
 DECL_EXPORT BmJpuDecReturnCodes bm_jpu_dec_flush(BmJpuDecoder *decoder);
@@ -1045,11 +907,6 @@ typedef struct
      * See the BmJpuColorFormat documentation for the consequences of this. */
     int chroma_interleave;
 
-    /* Allocator for additional internal DMA buffers, such as the dummy U and V
-     * planes for the fake YUV400 encoding (when MJPEG is not the codec format).
-     * If this is NULL, bm_jpu_enc_get_default_allocator() is used. */
-    BmJpuDMABufferAllocator *additional_dmabuffers_allocator; // TODO
-
     int packed_format;
     int device_index;
 
@@ -1157,9 +1014,6 @@ DECL_EXPORT char const * bm_jpu_enc_error_string(BmJpuEncReturnCodes code);
 DECL_EXPORT BmJpuEncReturnCodes bm_jpu_enc_load(int device_index);
 DECL_EXPORT BmJpuEncReturnCodes bm_jpu_enc_unload(int device_index);
 
-/* Convenience predefined allocator for allocating DMA buffers. */
-DECL_EXPORT BmJpuDMABufferAllocator* bm_jpu_enc_get_default_allocator(void);
-
 /* Called before bm_jpu_enc_open(), it returns the alignment and size for the
  * physical memory block necessary for the encoder's bitstream buffer. The user
  * must allocate a DMA buffer of at least this size, and its physical address
@@ -1172,7 +1026,7 @@ DECL_EXPORT BmJpuEncReturnCodes bm_jpu_enc_set_default_open_params(BmJpuEncOpenP
 
 /* Opens a new encoder instance. "open_params" and "bitstream_buffer" must not be NULL. */
 DECL_EXPORT BmJpuEncReturnCodes bm_jpu_enc_open(BmJpuEncoder **encoder, BmJpuEncOpenParams *open_params,
-                                    BmJpuDMABuffer *bitstream_buffer);
+                                    bm_device_mem_t *bitstream_buffer);
 
 /* Closes a encoder instance. Trying to close the same instance multiple times results in undefined behavior. */
 DECL_EXPORT BmJpuEncReturnCodes bm_jpu_enc_close(BmJpuEncoder *encoder);

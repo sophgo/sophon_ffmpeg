@@ -114,6 +114,7 @@ typedef struct _BMDecContext{
     BMHandleBuffer  *bm_handle_buffer;
     int reserved[11];
     int use_gst_flag;
+    int core_idx;
 } BMDecContext;
 
 #ifdef __cplusplus

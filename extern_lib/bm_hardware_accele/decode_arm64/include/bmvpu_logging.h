@@ -1,4 +1,14 @@
-
+/*****************************************************************************
+ *
+ *    Copyright (C) 2022 Sophgo Technologies Inc.  All rights reserved.
+ *
+ *    bmvid is licensed under the 2-Clause BSD License except for the
+ *    third-party components.
+ *
+ *****************************************************************************/
+/* This library provides a high-level interface for controlling the BitMain
+ * Sophon VPU en/decoder.
+ */
 #ifndef __BM_VPU_LOGGING_H__
 #define __BM_VPU_LOGGING_H__
 

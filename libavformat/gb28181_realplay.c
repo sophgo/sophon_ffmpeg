@@ -27,7 +27,6 @@ const AVOption ff_gb28181_options[] = {
     { NULL },
 };
 
-
 static int gb28181_probe(AVProbeData *p) {
     if (av_strstart(p->filename, "gb28181:",NULL)) {
       return AVPROBE_SCORE_MAX;
@@ -169,13 +168,12 @@ static int gb28181_read_header(AVFormatContext *s) {
         fwrite(probe_buf,probe_len,1,fp);
         fclose(fp);
 #endif
-
         fmt = av_probe_input_format2(&pd, 1, &score);
         if(fmt != NULL){
             s->streams[0]->codecpar->codec_id = fmt->raw_codec_id;
             printf("codec_id=%d\n",s->streams[0]->codecpar->codec_id);
         } else {
-            printf("can't find codec_id. psm codec_id=%d\n",s->streams[0]->codecpar->codec_id);
+            printf("psm codec_id=%d\n",s->streams[0]->codecpar->codec_id);
         }
         break;
     }

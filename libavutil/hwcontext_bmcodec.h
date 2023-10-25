@@ -22,7 +22,7 @@
 
 #ifndef AVUTIL_HWCONTEXT_BMCODEC_H
 #define AVUTIL_HWCONTEXT_BMCODEC_H
-
+#include "bmlib_runtime.h"
 /**
  * BmCodec details.
  *
@@ -40,6 +40,11 @@ typedef struct AVBmCodecDeviceContext {
      * If no device is required, set to -1.
      */
     int fd; // TODO
+    /* HANDLE of Sophon device.
+     * if no device is required,set to NULL.
+     */
+    bm_handle_t handle;
+    uint8_t* map_vaddr;
 } AVBmCodecDeviceContext;
 
 /**
@@ -70,6 +75,7 @@ typedef struct AVBmCodecFrame {
 
     /* av_hwframe_get_buffer() */
     void*             buffer;
+    uint8_t*          buffer_vaddr;
 
     uint8_t*          data[4];
     int               linesize[4];
@@ -77,6 +83,7 @@ typedef struct AVBmCodecFrame {
     int               padded;
     int               coded_width;
     int               coded_height;
+    bm_handle_t       handle;
     int               reserved[5];
 } AVBmCodecFrame;
 

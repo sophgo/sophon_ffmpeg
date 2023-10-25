@@ -49,7 +49,7 @@
 #include "internal.h"
 #include "bmqueue.h"
 #include "bmvpuapi.h"
-#include "bm_ion.h"
+#include "bmlib_runtime.h"
 
 
 #ifndef MIN
@@ -64,6 +64,8 @@
 #define BM_MAX_MB_NUM                      0x40000     // MB num for max resolution = 8192x8192/(16x16)
 #define BM_VPU_ALIGN16(_x)             (((_x)+0x0f)&~0x0f)
 #define BM_VPU_ALIGN64(_x)             (((_x)+0x3f)&~0x3f)
+
+#define HEAP_MASK_1_2                      0x06
 
 typedef struct {
     AVCodecContext *avctx;
@@ -84,21 +86,21 @@ typedef struct {
 
     BmVpuEncInitialInfo initial_info;
 
-    BmVpuDMABufferAllocator *dma_memory_allocator;
+    bm_device_mem_t *dma_memory_allocator;
 
     BmVpuFramebuffer* rec_fb_list;
-    BmVpuDMABuffer**  rec_fb_dmabuffers;
+    bm_device_mem_t**  rec_fb_dmabuffers;
     int num_rec_fb;
 
     BmVpuFramebuffer* src_fb_list;
-    BmVpuDMABuffer**  src_fb_dmabuffers;
+    bm_device_mem_t**  src_fb_dmabuffers;
     void*             frame_unused_queue;
     int num_src_fb;
     BmVpuFramebuffer* src_fb;
 
     void*   avframe_used_list;
 
-    BmVpuDMABuffer *bs_dma_buffer;
+    bm_device_mem_t *bs_dma_buffer;
     size_t bs_buffer_size;
     unsigned int bs_buffer_alignment;
 
@@ -106,6 +108,8 @@ typedef struct {
     BmVpuEncParams enc_params;
     BmVpuRawFrame input_frame;
     BmVpuEncodedFrame output_frame;
+
+    bm_handle_t handle;
 
     int    hw_accel;
 
@@ -240,14 +244,6 @@ static void finish_output_buffer(void *context, void *acquired_handle)
 {
     ((void)(context));
 }
-static uint8_t* bm_wrapped_map(BmVpuWrappedDMABuffer *wrapped_dma_buffer,
-                               unsigned int flags)
-{
-    return NULL;
-}
-static void bm_wrapped_unmap(BmVpuWrappedDMABuffer *wrapped_dma_buffer)
-{
-}
 
 static BmVpuFramebuffer* get_src_framebuffer(AVCodecContext *avctx)
 {
@@ -302,10 +298,11 @@ static int bm_image_upload(BmVpuEncoder* video_encoder,
                "plane %d: bwidth %zd, dst_linesize %zd, src_linesize %zd\n",
                i, bwidth, dst_linesize, src_linesize);
 
-        ret = bmvpu_upload_data(video_encoder->core_idx, src, src_linesize,
+        ret = bmvpu_upload_data(video_encoder->soc_idx, src, src_linesize,
                                 dst, dst_linesize, bwidth, h);
-        if (ret < 0) {
-            av_log(NULL, AV_LOG_ERROR, "bmvpu_upload_data failed\n");
+        // ret = bm_memcpy_s2d_partial(bmvpu_enc_get_bmlib_handle(video_encoder->soc_idx), dst, src, bwidth*h);
+        if (ret != BM_SUCCESS) {
+            av_log(NULL, AV_LOG_ERROR, "bm_memcpy_s2d_partial failed\n");
             return -1;
         }
     }
@@ -409,12 +406,13 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
         return AVERROR_EXTERNAL;
     }
 
+    ctx->handle = bmvpu_enc_get_bmlib_handle(ctx->soc_idx);
+
     ctx->core_idx = bmvpu_enc_get_core_idx(ctx->soc_idx);
     ctx->is_end = false;
 
     /* Allocator for external DMA buffers.
      * If this is NULL, bmvpu_get_default_allocator() is used. */
-    ctx->dma_memory_allocator = bmvpu_get_default_allocator();
 
 #if 0
     /* The size for YUV 420/422/444 */
@@ -528,12 +526,10 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
 #define BS_MASK (1024*4-1)
     ctx->bs_buffer_size = (ctx->bs_buffer_size+BS_MASK)&(~BS_MASK);
 
-    ctx->bs_dma_buffer = bmvpu_dma_buffer_allocate(ctx->dma_memory_allocator,
-                                                   ctx->soc_idx, ctx->bs_buffer_size,
-                                                   ctx->bs_buffer_alignment,
-                                                   BM_VPU_ALLOCATION_FLAG_DEFAULT);
-    if (ctx->bs_dma_buffer == NULL) {
-        av_log(avctx, AV_LOG_ERROR, "bmvpu_dma_buffer_allocate failed!\n");
+    ctx->bs_dma_buffer = (bm_device_mem_t *)malloc(sizeof(bm_device_mem_t));
+    ret = bmvpu_malloc_device_byte_heap(ctx->handle, ctx->bs_dma_buffer, ctx->bs_buffer_size, 0x06,  1);
+    if (ret != BM_SUCCESS) {
+        av_log(avctx, AV_LOG_ERROR, "bmvpu_malloc_device_byte_heap failed! 554\n");
         return AVERROR_EXTERNAL;
     }
 
@@ -571,7 +567,7 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
         ret = AVERROR(ENOMEM);
         goto cleanup;
     }
-    ctx->rec_fb_dmabuffers = av_mallocz(sizeof(BmVpuDMABuffer*) * ctx->num_rec_fb);
+    ctx->rec_fb_dmabuffers = av_mallocz(sizeof(bm_device_mem_t*) * ctx->num_rec_fb);
     if (ctx->rec_fb_dmabuffers == NULL) {
         av_log(avctx, AV_LOG_ERROR, "av_mallocz failed\n");
         ret = AVERROR(ENOMEM);
@@ -585,11 +581,12 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
          * It is possible to specify alternate allocators;
          * all that is required is that the allocator provides physically contiguous memory
          * (necessary for DMA transfers) and repects the alignment value. */
-        ctx->rec_fb_dmabuffers[i] = bmvpu_dma_buffer_allocate(ctx->dma_memory_allocator,
-                                                              ctx->soc_idx,
-                                                              ctx->initial_info.rec_fb.size,
-                                                              ctx->initial_info.framebuffer_alignment,
-                                                              BM_VPU_ALLOCATION_FLAG_DEFAULT);
+        ctx->rec_fb_dmabuffers[i] = (bm_device_mem_t *)av_mallocz(sizeof(bm_device_mem_t));
+        ret = bmvpu_malloc_device_byte_heap(ctx->handle, ctx->rec_fb_dmabuffers[i], ctx->initial_info.rec_fb.size, 0x06,  1);
+        if (ret != BM_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR, "bmvpu_malloc_device_byte_heap failed! 613\n");
+            return AVERROR_EXTERNAL;
+        }
 
         bmvpu_fill_framebuffer_params(&(ctx->rec_fb_list[i]),
                                       &(ctx->initial_info.rec_fb),
@@ -630,7 +627,7 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
                                           NULL, src_id, NULL);
         }
     } else {
-        ctx->src_fb_dmabuffers = av_mallocz(sizeof(BmVpuDMABuffer*) * ctx->num_src_fb);
+        ctx->src_fb_dmabuffers = av_mallocz(sizeof(bm_device_mem_t*) * ctx->num_src_fb);
         if (ctx->src_fb_dmabuffers == NULL) {
             av_log(avctx, AV_LOG_ERROR, "av_mallocz failed\n");
             ret = AVERROR(ENOMEM);
@@ -641,11 +638,12 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
             int src_id = 0x100 + i; // TODO
 
             /* Allocate a DMA buffer for each raw input frame. */
-            ctx->src_fb_dmabuffers[i] = bmvpu_dma_buffer_allocate(ctx->dma_memory_allocator,
-                                                                  ctx->soc_idx,
-                                                                  ctx->initial_info.src_fb.size,
-                                                                  ctx->initial_info.framebuffer_alignment,
-                                                                  BM_VPU_ALLOCATION_FLAG_DEFAULT);
+            ctx->src_fb_dmabuffers[i] = (bm_device_mem_t *)av_mallocz(sizeof(bm_device_mem_t));
+            ret = bmvpu_malloc_device_byte_heap(ctx->handle, ctx->src_fb_dmabuffers[i], ctx->initial_info.src_fb.size, 0x06,  1);
+            if (ret != BM_SUCCESS) {
+                av_log(avctx, AV_LOG_ERROR, "bmvpu_malloc_device_byte_heap failed! 675\n");
+                return AVERROR_EXTERNAL;
+            }
 
             bmvpu_fill_framebuffer_params(&(ctx->src_fb_list[i]),
                                           &(ctx->initial_info.src_fb),
@@ -655,7 +653,7 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
         }
     }
 
-    ctx->enc_params.roi_dma_buffer = av_mallocz(sizeof(BmVpuDMABuffer)*ctx->num_src_fb);
+    ctx->enc_params.roi_dma_buffer = av_mallocz(sizeof(bm_device_mem_t)*ctx->num_src_fb);
     if (ctx->enc_params.roi_dma_buffer == NULL) {
         av_log(avctx, AV_LOG_ERROR, "av_mallocz failed\n");
         ret = AVERROR(ENOMEM);
@@ -671,10 +669,13 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
     ctx->enc_params.customMapOptUsedIndex = 0;
     for (i = 0; i < ctx->num_src_fb; ++i) {
         int alignment = 1;
-        ctx->enc_params.roi_dma_buffer[i] = bmvpu_dma_buffer_allocate(ctx->dma_memory_allocator,
-                                                       ctx->soc_idx, BM_MAX_MB_NUM,
-                                                       alignment, BM_VPU_ALLOCATION_FLAG_DEFAULT);
-        ctx->enc_params.customMapOpt[i].addrCustomMap = (uint8_t*)bmvpu_dma_buffer_get_physical_address(ctx->enc_params.roi_dma_buffer[i]);
+        ctx->enc_params.roi_dma_buffer[i] = (bm_device_mem_t *)malloc(sizeof(bm_device_mem_t));
+        ret = bmvpu_malloc_device_byte_heap(ctx->handle, ctx->enc_params.roi_dma_buffer[i], BM_MAX_MB_NUM, HEAP_MASK_1_2,  1);
+        if(ret != BM_SUCCESS)
+        {
+            av_log(NULL, AV_LOG_ERROR, "[%s, %d] bmvpu_malloc_device_byte_heap() failed!\n", __FILE__, __LINE__);
+        }
+        ctx->enc_params.customMapOpt[i].addrCustomMap = bm_mem_get_device_addr(*(ctx->enc_params.roi_dma_buffer[i]));
     }
 
 
@@ -777,8 +778,10 @@ static av_cold int bm_videoenc_close(AVCodecContext *avctx)
         ctx->rec_fb_list = NULL;
     }
     if (ctx->rec_fb_dmabuffers) {
-        for (i = 0; i < ctx->num_rec_fb; ++i)
-            bmvpu_dma_buffer_deallocate(ctx->rec_fb_dmabuffers[i]);
+        for (i = 0; i < ctx->num_rec_fb; ++i){
+            bm_free_device(ctx->handle, *(ctx->rec_fb_dmabuffers[i]));
+            av_free(ctx->rec_fb_dmabuffers[i]);
+        }
         av_free(ctx->rec_fb_dmabuffers);
         ctx->rec_fb_dmabuffers = NULL;
     }
@@ -794,8 +797,10 @@ static av_cold int bm_videoenc_close(AVCodecContext *avctx)
     }
     if (!ctx->zero_copy) {
         if (ctx->src_fb_dmabuffers) {
-            for (i = 0; i < ctx->num_src_fb; ++i)
-                bmvpu_dma_buffer_deallocate(ctx->src_fb_dmabuffers[i]);
+            for (i = 0; i < ctx->num_src_fb; ++i) {
+                bm_free_device(ctx->handle, *(ctx->src_fb_dmabuffers[i]));
+                av_free(ctx->src_fb_dmabuffers[i]);
+            }
             av_free(ctx->src_fb_dmabuffers);
             ctx->src_fb_dmabuffers = NULL;
         }
@@ -806,14 +811,16 @@ static av_cold int bm_videoenc_close(AVCodecContext *avctx)
     }
 
     if (ctx->bs_dma_buffer) {
-        bmvpu_dma_buffer_deallocate(ctx->bs_dma_buffer);
+        bm_free_device(ctx->handle, *(ctx->bs_dma_buffer));
+        av_free(ctx->bs_dma_buffer);
         ctx->bs_dma_buffer = NULL;
     }
 
     if (ctx->enc_params.roi_dma_buffer) {
         for (i = 0; i < ctx->num_src_fb; ++i) {
             if (ctx->enc_params.roi_dma_buffer[i]) {
-                bmvpu_dma_buffer_deallocate(ctx->enc_params.roi_dma_buffer[i]);
+                bm_free_device(ctx->handle, *(ctx->enc_params.roi_dma_buffer[i]));
+                av_free(ctx->enc_params.roi_dma_buffer[i]);
                 ctx->enc_params.roi_dma_buffer[i] = NULL;
             }
         }
@@ -838,7 +845,7 @@ static av_cold int bm_videoenc_close(AVCodecContext *avctx)
             ctx->soc_idx = -1;
     }
 
-    av_log(avctx, AV_LOG_TRACE, "Leave %s\n", __func__);
+    // av_log(avctx, AV_LOG_TRACE, "Leave %s\n", __func__);
 
     return 0;
 }
@@ -878,20 +885,19 @@ static int SetMapData(AVCodecContext *avctx, BmVpuEncParams *encoding_params, in
 
 #ifdef BM_PCIE_MODE
         ctx->core_idx = bmvpu_enc_get_core_idx(ctx->soc_idx);
-        int ret = bmvpu_upload_data(ctx->core_idx, customMapBuf, sizeof(AvcEncCustomMap)*BM_MAX_MB_NUM, encoding_params->customMapOpt[encoding_params->customMapOptUsedIndex].addrCustomMap, sizeof(AvcEncCustomMap)*BM_MAX_MB_NUM, sizeof(AvcEncCustomMap)*BM_MAX_MB_NUM, 1);
+        int ret = bmvpu_upload_data(ctx->soc_idx, customMapBuf, sizeof(AvcEncCustomMap)*BM_MAX_MB_NUM, encoding_params->customMapOpt[encoding_params->customMapOptUsedIndex].addrCustomMap, sizeof(AvcEncCustomMap)*BM_MAX_MB_NUM, sizeof(AvcEncCustomMap)*BM_MAX_MB_NUM, 1);
         if (ret < 0)
         {
             av_log(avctx, AV_LOG_ERROR, "bmvpu_upload_data failed");
             return -1;
         }
 #else
-        uint8_t* map_va = bmvpu_dma_buffer_map(encoding_params->roi_dma_buffer[encoding_params->customMapOptUsedIndex], BM_VPU_MAPPING_FLAG_WRITE);
-        if (map_va==NULL)
-        {
-            av_log(avctx, AV_LOG_ERROR, "bmvpu_dma_buffer_map failed");
-            return -1;
+        unsigned long long vmem;
+        int ret = bm_mem_mmap_device_mem_no_cache(ctx->handle, encoding_params->roi_dma_buffer[encoding_params->customMapOptUsedIndex], &vmem);
+        if (ret != BM_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR, "bm_mem_mmap_device_mem_no_cache failed\n");
         }
-        memcpy(map_va, customMapBuf, sizeof(AvcEncCustomMap)*BM_MAX_MB_NUM);
+        memcpy(vmem, customMapBuf, sizeof(AvcEncCustomMap)*BM_MAX_MB_NUM);
 #endif
     } else if (avctx->codec_id == AV_CODEC_ID_H265) {
         EncCustomMap        customMapBuf[BM_MAX_CTU_NUM];  // custom map 1 CTU data = 64bits
@@ -948,20 +954,19 @@ static int SetMapData(AVCodecContext *avctx, BmVpuEncParams *encoding_params, in
 
 #ifdef BM_PCIE_MODE
         ctx->core_idx = bmvpu_enc_get_core_idx(ctx->soc_idx);
-        int ret = bmvpu_upload_data(ctx->core_idx, customMapBuf, BM_MAX_CTU_NUM*sizeof(EncCustomMap), encoding_params->customMapOpt[encoding_params->customMapOptUsedIndex].addrCustomMap, BM_MAX_CTU_NUM*sizeof(EncCustomMap), BM_MAX_CTU_NUM*sizeof(EncCustomMap), 1);
+        int ret = bmvpu_upload_data(ctx->soc_idx, customMapBuf, BM_MAX_CTU_NUM*sizeof(EncCustomMap), encoding_params->customMapOpt[encoding_params->customMapOptUsedIndex].addrCustomMap, BM_MAX_CTU_NUM*sizeof(EncCustomMap), BM_MAX_CTU_NUM*sizeof(EncCustomMap), 1);
         if (ret < 0)
         {
             av_log(avctx, AV_LOG_ERROR, "bmvpu_upload_data failed");
             return -1;
         }
 #else
-        uint8_t* map_va = bmvpu_dma_buffer_map(encoding_params->roi_dma_buffer[encoding_params->customMapOptUsedIndex], BM_VPU_MAPPING_FLAG_WRITE);
-        if (map_va==NULL)
-        {
-            av_log(avctx, AV_LOG_ERROR, "bmvpu_dma_buffer_map failed");
-            return -1;
+        unsigned long long vmem;
+        int ret = bm_mem_mmap_device_mem_no_cache(ctx->handle, encoding_params->roi_dma_buffer[encoding_params->customMapOptUsedIndex], &vmem);
+        if (ret != BM_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR, "bm_mem_mmap_device_mem_no_cache failed\n");
         }
-        memcpy(map_va, customMapBuf, sizeof(EncCustomMap)*BM_MAX_CTU_NUM);
+        memcpy(vmem, customMapBuf, sizeof(EncCustomMap)*BM_MAX_CTU_NUM);
 #endif
     }
 
@@ -973,7 +978,7 @@ static int bm_videoenc_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
 {
     BmVpuEncContext* ctx = (BmVpuEncContext *)(avctx->priv_data);
     AVFrame* pic = NULL;
-    BmVpuWrappedDMABuffer wrapped_dma_buffer;
+    bm_device_mem_t wrapped_dmem;
     BmVpuEncReturnCodes enc_ret;
     unsigned int output_code = 0; // TODO
     struct timeval ps;
@@ -1097,16 +1102,11 @@ static int bm_videoenc_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
                 total_size = y_size + c_size*2;
             }
 
-            bmvpu_init_wrapped_dma_buffer(&wrapped_dma_buffer);
-
-            wrapped_dma_buffer.map   = bm_wrapped_map;
-            wrapped_dma_buffer.unmap = bm_wrapped_unmap;
-
-            wrapped_dma_buffer.fd = 1;
+            wrapped_dmem.u.device.dmabuf_fd = 1;
             /* The EXTERNAL DMA buffer filled with frame data */
-            wrapped_dma_buffer.physical_address = (unsigned long)(pic->data[0]);
+            wrapped_dmem.u.device.device_addr = (unsigned long)(pic->data[0]);
             /* The size of EXTERNAL DMA buffer */
-            wrapped_dma_buffer.size = total_size;
+            wrapped_dmem.size = total_size;
 
             ctx->src_fb->y_stride    = pic->linesize[0];
             ctx->src_fb->cbcr_stride = pic->linesize[1];
@@ -1118,7 +1118,7 @@ static int bm_videoenc_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
             ctx->src_fb->cb_offset   = y_size;
             ctx->src_fb->cr_offset   = y_size + c_size;
 
-            ctx->src_fb->dma_buffer  = (BmVpuDMABuffer *)&wrapped_dma_buffer;
+            ctx->src_fb->dma_buffer  = (bm_device_mem_t *)&wrapped_dmem;
         } else if (!ctx->zero_copy) {
             /* The input frames come in Non-DMA memory */
             uint8_t* addr;
@@ -1141,15 +1141,15 @@ static int bm_videoenc_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
 
             /* Load the input pixels into the DMA buffer */
 #ifdef BM_PCIE_MODE
-            addr = (uint8_t*)bmvpu_dma_buffer_get_physical_address(ctx->src_fb->dma_buffer);
+            addr = (uint8_t*)bm_mem_get_device_addr(*(ctx->src_fb->dma_buffer));
             if (addr == NULL) {
-                av_log(avctx, AV_LOG_ERROR, "bmvpu_dma_buffer_get_physical_address failed\n");
+                av_log(avctx, AV_LOG_ERROR, "bm_mem_get_device_addr failed\n");
                 return AVERROR_EXTERNAL;
             }
 #else
-            addr = bmvpu_dma_buffer_map(ctx->src_fb->dma_buffer, BM_VPU_MAPPING_FLAG_WRITE);
-            if (addr == NULL) {
-                av_log(avctx, AV_LOG_ERROR, "bmvpu_dma_buffer_map failed\n");
+            ret = bm_mem_mmap_device_mem_no_cache(ctx->handle, ctx->src_fb->dma_buffer, &addr);
+            if (ret != BM_SUCCESS) {
+                av_log(avctx, AV_LOG_ERROR, "bm_mem_mmap_device_mem_no_cache failed\n");
                 return AVERROR_EXTERNAL;
             }
 #endif
@@ -1199,10 +1199,10 @@ static int bm_videoenc_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
 
 #ifndef BM_PCIE_MODE
             /* Flush cache to DMA buffer */
-            bmvpu_dma_buffer_flush(ctx->src_fb->dma_buffer);
+            // bm_mem_flush_device_mem(ctx->handle, ctx->src_fb->dma_buffer);
 
             /* Unmap the DMA buffer of the raw frame */
-            bmvpu_dma_buffer_unmap(ctx->src_fb->dma_buffer);
+            bm_mem_unmap_device_mem(ctx->handle, addr, bm_mem_get_device_size(*(ctx->src_fb->dma_buffer)));
 #endif
         } else { /* The input frames come from DMA memory defined by user */
             int y_size, c_size, total_size;
@@ -1229,16 +1229,11 @@ static int bm_videoenc_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
                 total_size = y_size + c_size;
             }
 
-            bmvpu_init_wrapped_dma_buffer(&wrapped_dma_buffer);
-
-            wrapped_dma_buffer.map   = bm_wrapped_map;
-            wrapped_dma_buffer.unmap = bm_wrapped_unmap;
-
-            wrapped_dma_buffer.fd = 1;
+            wrapped_dmem.u.device.dmabuf_fd = 1;
             /* The EXTERNAL DMA buffer filled with frame data */
-            wrapped_dma_buffer.physical_address = (unsigned long)pic->data[4];
+            wrapped_dmem.u.device.device_addr = (unsigned long)(pic->data[4]);
             /* The size of EXTERNAL DMA buffer */
-            wrapped_dma_buffer.size = total_size;
+            wrapped_dmem.size = total_size;
 
             ctx->src_fb->y_stride    = pic->linesize[4];
             ctx->src_fb->cbcr_stride = pic->linesize[5];
@@ -1250,7 +1245,7 @@ static int bm_videoenc_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
             ctx->src_fb->cb_offset   = y_size;
             ctx->src_fb->cr_offset   = y_size + c_size;
 
-            ctx->src_fb->dma_buffer  = (BmVpuDMABuffer *)&wrapped_dma_buffer;
+            ctx->src_fb->dma_buffer  = (bm_device_mem_t *)&wrapped_dmem;
         }
 
         ctx->enc_params.skip_frame = 0; // TODO

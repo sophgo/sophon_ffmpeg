@@ -1,4 +1,14 @@
-
+/*****************************************************************************
+ *
+ *    Copyright (C) 2022 Sophgo Technologies Inc.  All rights reserved.
+ *
+ *    bmvid is licensed under the 2-Clause BSD License except for the
+ *    third-party components.
+ *
+ *****************************************************************************/
+/* This library provides a high-level interface for controlling the BitMain
+ * Sophon VPU en/decoder.
+ */
 #ifndef __BM_VPU_LIB_H__
 #define __BM_VPU_LIB_H__
 
@@ -23,7 +33,7 @@
 #define H264_TAG_PROFILE_HIGH10       4
 
 #if defined(_WIN32) || defined(WIN32) || defined(__WIN32__)
-#define ATTRIBUTE 
+#define ATTRIBUTE
 #define DECL_EXPORT __declspec(dllexport)
 #define DECL_IMPORT __declspec(dllimport)
 #else
@@ -1055,9 +1065,6 @@ DECL_EXPORT int vpu_CalcChromaSize(int mapType, uint32_t stride, uint32_t height
 DECL_EXPORT int vpu_GetFrameBufSize(int mapType, int stride, int height,
                         int yuv_format, int interleave);
 
-/* For now, only support PCIE mode */
-DECL_EXPORT int vpu_write_memory(const uint8_t *host_va, int size, int vpu_core_idx, uint64_t vpu_pa);
-DECL_EXPORT int vpu_read_memory(uint8_t *host_va, int size, int vpu_core_idx, uint64_t vpu_pa);
 
 #endif /* __BM_VPU_LIB_H__ */
 

@@ -160,7 +160,7 @@ static int gb28181pb_read_header(AVFormatContext *s) {
             s->streams[0]->codecpar->codec_id = fmt->raw_codec_id;
             printf("codec_id=%d\n",s->streams[0]->codecpar->codec_id);
         } else {
-            printf("can't find codec_id. psm codec_id=%d\n",s->streams[0]->codecpar->codec_id);
+            printf("psm codec_id=%d\n",s->streams[0]->codecpar->codec_id);
         }
         av_freep(pict_list);
         break;

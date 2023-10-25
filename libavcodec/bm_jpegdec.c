@@ -50,9 +50,9 @@
 #include "bmjpuapi.h"
 #include "bmjpuapi_jpeg.h"
 #include "bm_jpeg_common.h"
-#if defined(BM1684)
-#include "bm_ion.h"
-#endif
+#include "bmlib_runtime.h"
+
+#define HEAP_MASK_1_2 0x06
 
 typedef struct {
     AVCodecContext* avctx; // TODO
@@ -82,14 +82,11 @@ typedef struct {
 
     double total_time; // ms
     long   total_frame;
-} BMJpegDecContext;
+    bm_handle_t handle;
 
-#if defined(BM1684)
-typedef struct {
-    BmJpuDMABuffer   parent;
-    bm_ion_buffer_t* mem_desc;
-} BmIonDMABuffer;
-#endif
+    int framebuffer_recycle;
+    size_t framebuffer_size;
+} BMJpegDecContext;
 
 #ifndef MAGIC_JPEG
 #define MAGIC_JPEG          0x4A504547
@@ -101,12 +98,16 @@ typedef struct {
     unsigned int magic_number; //0x4A504547 JPEG  0x204D4154 MAT
     BMJpegDecContext* ctx;
     BmJpuFramebuffer* framebuffer;
+    bm_device_mem_t* dma_buffer_to_user;
 #if defined(BM1684)
     AVBmCodecFrame*   hwpic;
 #endif
 #ifdef BM_PCIE_MODE
     void *data;
+#else
+    uint8_t* vaddr;
 #endif
+    unsigned int data_size;
     int release_count;
 } bm_opaque_t;
 
@@ -141,6 +142,7 @@ static void bm_jpegdec_buffer_release(void *opaque, uint8_t *data)
 {
     bm_opaque_t* bm_opaque = (bm_opaque_t*)opaque;
     BMJpegDecContext* ctx;
+    bm_handle_t handle;
 
     av_log(NULL, AV_LOG_TRACE, "Enter %s\n", __func__);
 
@@ -156,32 +158,51 @@ static void bm_jpegdec_buffer_release(void *opaque, uint8_t *data)
     if (bm_opaque->release_count != 0)
         return;
 
+    // TODO: maybe illegal use of pointer if decoder is closed
+    /**
+     * bm_opaque->ctx is pointed to avctx->priv_data in bm_jpegdec_fill_frame function.
+     * if invoking avcodec_close function before releasing decoded frame, avctx->priv_data will be freed.
+     * but bm_opaque->ctx doesn't known it, this pointer is unavailable here.
+     */
     ctx = bm_opaque->ctx;
     /* Avoid exception after avcodec_close() */
-    if (ctx != NULL && ctx->jpeg_decoder) {
-        BmJpuFramebuffer *framebuffer = bm_opaque->framebuffer;
+    if (ctx != NULL) {
+        if (ctx->jpeg_decoder) {
+            BmJpuFramebuffer *framebuffer = bm_opaque->framebuffer;
+            if (framebuffer != NULL) {
+                /* Decoded frame is no longer needed,
+                * so inform the decoder that it can reclaim it */
+                bm_jpu_jpeg_dec_frame_finished(ctx->jpeg_decoder, framebuffer);
+            }
+        }
+
+        bm_dev_request(&handle, ctx->soc_idx);
 
         if (ctx->hw_accel==0) {
-#ifndef BM_PCIE_MODE
+    #ifdef BM_PCIE_MODE
+            if (bm_opaque->data != NULL)
+                av_free(bm_opaque->data);
+    #else
             /* Unmap the DMA buffer of the decoded picture */
-            bm_jpu_dma_buffer_unmap(framebuffer->dma_buffer);
-#endif
+            bm_mem_unmap_device_mem(handle, bm_opaque->vaddr, bm_opaque->data_size);
+    #endif
+        } else {
+    #if defined(BM1684)
+            if (bm_opaque->hwpic)
+                av_free(bm_opaque->hwpic);
+    #endif
         }
-        /* Decoded frame is no longer needed,
-         * so inform the decoder that it can reclaim it */
-        bm_jpu_jpeg_dec_frame_finished(ctx->jpeg_decoder, framebuffer);
-    }
 
-    if (ctx->hw_accel==0) {
-#ifdef BM_PCIE_MODE
-        if (bm_opaque->data != NULL)
-            av_free(bm_opaque->data);
-#endif
-    } else {
-#if defined(BM1684)
-        if (bm_opaque->hwpic)
-            av_free(bm_opaque->hwpic);
-#endif
+        if (ctx->framebuffer_recycle) {
+            bm_device_mem_t *dma_buffer_to_user = bm_opaque->dma_buffer_to_user;
+            if (dma_buffer_to_user != NULL) {
+                /* free device memory allocated for user */
+                bm_free_device(handle, *(dma_buffer_to_user));
+                av_free(dma_buffer_to_user);
+            }
+        }
+
+        bm_dev_free(handle);
     }
 
     av_free(bm_opaque);
@@ -195,10 +216,13 @@ static int bm_jpegdec_fill_frame(AVCodecContext *avctx,
 {
     BMJpegDecContext* ctx = (BMJpegDecContext *)(avctx->priv_data);
     BmJpuFramebuffer *framebuffer = info->framebuffer;
+    bm_device_mem_t *dma_buffer = framebuffer->dma_buffer;
     bm_opaque_t* bm_opaque;
-    uint8_t* phys_addr = (uint8_t*)bm_jpu_dma_buffer_get_physical_address(framebuffer->dma_buffer);
-    int size_yuv[3] = { info->   y_size, info->cbcr_size, info->cbcr_size };
+    uint8_t* phys_addr = (uint8_t*)bm_mem_get_device_addr(*(dma_buffer));
+    unsigned int data_size = bm_mem_get_device_size(*(dma_buffer));
+    int size_yuv[3] = { info->y_size, info->cbcr_size, info->cbcr_size };
     int i;
+    int ret;
 
     av_log(avctx, AV_LOG_TRACE, "Enter %s\n", __func__);
 
@@ -210,11 +234,38 @@ static int bm_jpegdec_fill_frame(AVCodecContext *avctx,
     frame->pict_type   = AV_PICTURE_TYPE_I;
     frame->key_frame   = 1;
 
+    // copy frame data to user and release internal framebuffer
+    if (ctx->framebuffer_recycle) {
+        bm_device_mem_t *dma_buffer_to_user = (bm_device_mem_t *)av_mallocz(sizeof(bm_device_mem_t));
+        ret = bm_malloc_device_byte_heap_mask(ctx->handle, dma_buffer_to_user, HEAP_MASK_1_2, info->framebuffer_size);
+        if (ret != BM_SUCCESS)
+        {
+            av_log(avctx, AV_LOG_ERROR, "bm_malloc_device_byte_heap_mask failed\n");
+            return AVERROR(ENOMEM);
+        }
+
+        ret = bm_memcpy_d2d_byte(ctx->handle, *(dma_buffer_to_user), 0, *(dma_buffer), 0, info->framebuffer_size);
+        if (ret != BM_SUCCESS)
+        {
+            av_log(avctx, AV_LOG_ERROR, "bm_memcpy_d2d_byte failed\n");
+            return AVERROR_UNKNOWN;
+        }
+
+        bm_jpu_jpeg_dec_frame_finished(ctx->jpeg_decoder, framebuffer);
+
+        framebuffer = NULL;
+        dma_buffer = dma_buffer_to_user;
+        phys_addr = (uint8_t*)bm_mem_get_device_addr(*(dma_buffer_to_user));
+        data_size = info->framebuffer_size;
+    }
+
     bm_opaque = (bm_opaque_t*)av_mallocz(sizeof(bm_opaque_t));
-    bm_opaque->magic_number  = MAGIC_JPEG;
-    bm_opaque->ctx           = ctx;
-    bm_opaque->framebuffer   = framebuffer;
-    bm_opaque->release_count = 3;
+    bm_opaque->magic_number         = MAGIC_JPEG;
+    bm_opaque->ctx                  = ctx;
+    bm_opaque->framebuffer          = framebuffer;
+    bm_opaque->dma_buffer_to_user   = ctx->framebuffer_recycle ? dma_buffer : NULL;
+    bm_opaque->data_size            = data_size;
+    bm_opaque->release_count        = 3;
 
     /* For bm hw accel framework */
     if (ctx->hw_accel) {
@@ -226,7 +277,7 @@ static int bm_jpegdec_fill_frame(AVCodecContext *avctx,
         }
 
         hwpic->type        = 0;
-        hwpic->buffer      = ((BmIonDMABuffer*)framebuffer->dma_buffer)->mem_desc;
+        hwpic->buffer      = dma_buffer;
 
         hwpic->data[0]     = phys_addr + info-> y_offset;
         hwpic->data[1]     = phys_addr + info->cb_offset;
@@ -261,8 +312,6 @@ static int bm_jpegdec_fill_frame(AVCodecContext *avctx,
         uint8_t* virt_addr;
         uint8_t* yuv_virt_addr[3];
 #ifdef BM_PCIE_MODE
-        int data_size;
-        data_size = bm_jpu_dma_buffer_get_size(info->framebuffer->dma_buffer);
         virt_addr = av_mallocz(data_size);
         if (!virt_addr) {
             av_log(avctx, AV_LOG_ERROR, "Failed to allocate buffer\n");
@@ -270,17 +319,23 @@ static int bm_jpegdec_fill_frame(AVCodecContext *avctx,
         }
         if (!ctx->zero_copy) {
             // TODO extra cost when process only via HW device
-            int ret = bm_jpu_dma_buffer_download_data(framebuffer->dma_buffer, virt_addr, data_size);
-            if (ret) {
+            ret = bm_memcpy_d2s_partial(ctx->handle, virt_addr, *(dma_buffer), data_size);
+            if (ret != BM_SUCCESS) {
                 av_free(virt_addr);
-                av_log(avctx, AV_LOG_ERROR, "Failed to call bm_jpu_dma_buffer_download_data\n");
+                av_log(avctx, AV_LOG_ERROR, "Failed to call bm_memcpy_d2s\n");
                 return AVERROR_UNKNOWN;
             }
         }
 #else
         /* Map the DMA buffer of the decoded picture */
         // TODO extra cost when process only via HW
-        virt_addr = bm_jpu_dma_buffer_map(framebuffer->dma_buffer, BM_JPU_MAPPING_FLAG_READ);
+        unsigned long long p_vaddr = 0;
+        int ret = bm_mem_mmap_device_mem(ctx->handle, dma_buffer, &p_vaddr);
+        if (ret != BM_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to call bm_mem_mmap_device_mem\n");
+            return AVERROR_UNKNOWN;
+        }
+        virt_addr = (uint8_t*)p_vaddr;
 #endif
         yuv_virt_addr[0] = virt_addr + info->y_offset;
         yuv_virt_addr[1] = virt_addr + info->cb_offset;
@@ -288,6 +343,8 @@ static int bm_jpegdec_fill_frame(AVCodecContext *avctx,
 
 #ifdef BM_PCIE_MODE
         bm_opaque->data = virt_addr;
+#else
+        bm_opaque->vaddr = virt_addr;
 #endif
 
         for (i=0; i<3; i++) {
@@ -363,6 +420,11 @@ static av_cold int bm_jpegdec_init(AVCodecContext *avctx)
 #ifndef BM_PCIE_MODE
     ctx->soc_idx = 0;
 #endif
+    ret = bm_dev_request(&ctx->handle, ctx->soc_idx);
+    if(ret != BM_SUCCESS)
+    {
+        av_log(ctx, AV_LOG_ERROR, "bmlib create handle failed\n");
+    }
 
     if (ctx->hw_accel == 0) {
         avctx->sw_pix_fmt =
@@ -388,10 +450,12 @@ static av_cold int bm_jpegdec_init(AVCodecContext *avctx)
         open_params.chroma_interleave = ctx->chroma_interleave;
     open_params.bs_buffer_size = ctx->bs_buffer_size*1024;
     open_params.device_index = ctx->soc_idx;
+    open_params.framebuffer_recycle = ctx->framebuffer_recycle;
+    open_params.framebuffer_size = ctx->framebuffer_size;
 
     ctx->jpeg_decoder = NULL;
     ret = bm_jpu_jpeg_dec_open(&(ctx->jpeg_decoder), &open_params,
-                               NULL, ctx->num_extra_framebuffers);
+                               ctx->num_extra_framebuffers);
     if (ret != BM_JPU_DEC_RETURN_CODE_OK) {
         av_log(avctx, AV_LOG_ERROR, "Failed to call bm_jpu_jpeg_dec_open\n");
         return AVERROR_INVALIDDATA;
@@ -431,6 +495,9 @@ static av_cold int bm_jpegdec_close(AVCodecContext *avctx)
             return AVERROR_UNKNOWN;
         }
     }
+
+    bm_dev_free(ctx->handle);
+    ctx->handle = NULL;
 
     av_log(avctx, AV_LOG_TRACE, "Leave %s\n", __func__);
 
@@ -486,6 +553,10 @@ static int bm_jpegdec_decode_frame(AVCodecContext *avctx, void *data, int *got_f
            bm_jpu_color_format_string(info.color_format));
     av_log(avctx, AV_LOG_DEBUG, "chroma interleave: %d\n",
            info.chroma_interleave);
+    av_log(avctx, AV_LOG_DEBUG, "framebuffer recycle: %d\n",
+           info.framebuffer_recycle);
+    av_log(avctx, AV_LOG_DEBUG, "framebuffer size: %ld\n",
+           info.framebuffer_size);
 
     if (info.framebuffer == NULL) {
         av_log(avctx, AV_LOG_ERROR,
@@ -593,6 +664,8 @@ static av_cold void bm_jpegdec_flush(AVCodecContext *avctx)
 
 #define OFFSET(x) offsetof(BMJpegDecContext, x)
 #define FLAGS AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM
+#define MAX_FRAMEBUFFER_SIZE (8192 * 8192 * 4)
+#define DEFAULT_FRAMEBUFFER_SIZE (1920 * 1080 * 3 / 2)
 
 static const AVOption options[] = {
     { "bs_buffer_size", "the bitstream buffer size (Kbytes) for bm jpeg decoder",
@@ -609,7 +682,11 @@ static const AVOption options[] = {
         OFFSET(zero_copy), AV_OPT_TYPE_FLAGS, {.i64 = 1}, 0, 1, FLAGS },
     { "perf", "flag to indicate if do the performance testing",
         OFFSET(perf), AV_OPT_TYPE_FLAGS, {.i64 = 0}, 0, 1, FLAGS },
-    { NULL},
+    { "framebuffer_recycle", "flag to indicate if recycle the framebuffer in bm jpeg decoder",
+        OFFSET(framebuffer_recycle), AV_OPT_TYPE_FLAGS, {.i64 = 0}, 0, 1, FLAGS },
+    { "framebuffer_size", "the framebuffer size for bm jpeg decoder (valid if framebuffer_recycle is 1)",
+        OFFSET(framebuffer_size), AV_OPT_TYPE_INT, {.i64 = DEFAULT_FRAMEBUFFER_SIZE}, 0, MAX_FRAMEBUFFER_SIZE, FLAGS },
+    { NULL },
 };
 
 #if defined(BM1684)

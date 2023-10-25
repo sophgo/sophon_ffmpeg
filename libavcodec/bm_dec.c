@@ -22,9 +22,7 @@
 
 #include "bm_video_interface.h"
 #include "bm_dec.h"
-#if defined(BM1684)
-#include "bm_ion.h"
-#endif
+#include "bmlib_runtime.h"
 
 
 #define MAX_FRAME_IN_BUFFER      0
@@ -517,6 +515,8 @@ static av_cold int bm_decode_init(AVCodecContext *avctx)
     param.extraFrameBufferNum = bmctx->extra_frame_buffer_num;
     param.skip_mode = bmctx->skip_non_idr;
     param.perf = bmctx->perf;
+    param.core_idx = bmctx->core_idx;
+
     ret = BMVidDecCreate(&handle, param);
     if (ret != 0) {
         av_log(avctx, AV_LOG_ERROR, "BMVidDecCreate failed\n");
@@ -830,24 +830,18 @@ static int bm_fill_frame(AVCodecContext *avctx, BMVidFrame* bmframe, AVFrame* fr
 
 #ifndef BM_PCIE_MODE
         /* vpu use reserved memory, we have to build a fake ion_buffer */
-        bm_ion_buffer_t *data = (bm_ion_buffer_t *)av_malloc(sizeof(bm_ion_buffer_t));
+        bm_device_mem_t *data = (bm_device_mem_t *)av_malloc(sizeof(bm_device_mem_t));
         if (data == NULL) {
             av_log(avctx, AV_LOG_ERROR, "av_malloc failed\n");
             return AVERROR(ENOMEM);
         }
 
-        data->memFd = -1;   // vpu reserved memory has not ion fd
-        data->paddr = (uint64_t)bmframe->buf[4];
-        data->vaddr = bmframe->buf[0];
+        data->u.device.dmabuf_fd = -1;   // vpu reserved memory has not ion fd
+        data->u.device.device_addr = (uint64_t)bmframe->buf[4];
         data->size = bmframe->size;
-        data->soc_idx = 0;
-        if (bmctx->enable_cache)
-            data->flags = BM_ION_FLAG_CACHED;
-        else
-            data->flags = BM_ION_FLAG_WRITECOMBINE;
-        data->map_flags = BM_ION_MAPPING_FLAG_READ; // decoded picture for reading
 
         hwpic->buffer = data;  //member buffer is only for soc, pcie do not use.
+        hwpic->buffer_vaddr = bmframe->buf[0];
 #endif
 
         if (bmctx->output_format == BMDEC_OUTPUT_COMPRESSED)
@@ -1609,7 +1603,7 @@ static int bm_decode(AVCodecContext *avctx, void *outdata, int *outdata_size, AV
     return bm_decode_internal(avctx, outdata, outdata_size, avpkt);
 }
 
-static av_cold void bm_flush(AVCodecContext *avctx)
+static av_cold void bm_flush_dec(AVCodecContext *avctx)
 {
     BMDecContext* bmctx = (BMDecContext*)(avctx->priv_data);
     BMVidCodHandle handle = bmctx->handle;
@@ -1667,7 +1661,7 @@ static const AVOption options[] = {
     { "cbcr_interleave", "cbcr interleave of output frame in the bitmain decoder context",
         OFFSET(cbcr_interleave), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, FLAGS },
     { "extra_frame_buffer_num", "number of extra frame buffer in the bitmain decoder context",
-        OFFSET(extra_frame_buffer_num), AV_OPT_TYPE_INT, {.i64 = 5}, 1, INT_MAX, FLAGS },
+        OFFSET(extra_frame_buffer_num), AV_OPT_TYPE_INT, {.i64 = 2}, 1, INT_MAX, FLAGS },
     { "extra_data_flag", "process extra data flag of avpkt in the bitmain decoder context",
         OFFSET(extra_data_flag), AV_OPT_TYPE_INT, {.i64 = 1}, 0, INT_MAX, FLAGS },
     { "frame_delay", "return a display frame after frame_delay frames decoding in the bitmain decoder context",
@@ -1691,6 +1685,10 @@ static const AVOption options[] = {
         OFFSET(secondary_axi), AV_OPT_TYPE_INT, {.i64 = 2}, 0, 2, FLAGS },
     { "use_gst_flag", "When ffmpeg is called with GST",
         OFFSET(use_gst_flag), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, FLAGS },
+    { "core_idx", "Specify a decoding core in a soc to decode. 1684 max = 3, 1684x max = 1",
+        OFFSET(core_idx), AV_OPT_TYPE_INT, {.i64 = -1}, -1, 3, FLAGS },
+    {"size_input_buffer","input buffer size of video decoder bitstream (0x200000, 0x700000)",
+        OFFSET(size_input_buffer),AV_OPT_TYPE_INT,{.i64=0x400000} ,0X200000,0X700000,FLAGS },
     { NULL},
 };
 
@@ -1728,7 +1726,7 @@ AVCodec ff_ ## NAME ## _bm_decoder = { \
     .init           = bm_decode_init,\
     .decode         = bm_decode,\
     .close          = bm_close,\
-    .flush          = bm_flush,\
+    .flush          = bm_flush_dec,\
     .bsfs           = bsf_name, \
     .capabilities   = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING, \
     .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM, \
@@ -1742,6 +1740,9 @@ BMDEC(h264,     "H.264",    AV_CODEC_ID_H264,       "h264_mp4toannexb");
 #endif
 #if CONFIG_HEVC_BM_DECODER
 BMDEC(hevc,     "HEVC",     AV_CODEC_ID_HEVC,       "hevc_mp4toannexb");
+#endif
+#if CONFIG_HEVC_BM_DECODER
+BMDEC(h265,     "H.265",     AV_CODEC_ID_H265,       "hevc_mp4toannexb");
 #endif
 
 #if CONFIG_VC1_BM_DECODER

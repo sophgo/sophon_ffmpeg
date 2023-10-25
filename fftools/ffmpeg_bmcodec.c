@@ -74,7 +74,7 @@ int bmcodec_init(AVCodecContext *s)
         frames_ctx->height            = FFALIGN(s->coded_height, 16);
     }
     else
-        frames_ctx->height            = FFALIGN(s->coded_height, 32);
+        frames_ctx->height            = FFALIGN(s->coded_height, 16);
     frames_ctx->format            = AV_PIX_FMT_BMCODEC;
     frames_ctx->sw_format         = s->sw_pix_fmt;
     frames_ctx->initial_pool_size = 0; // Dynamic allocation in internal decoder

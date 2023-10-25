@@ -1,3 +1,16 @@
+/*****************************************************************************
+ *
+ *    Copyright (C) 2022 Sophgo Technologies Inc.  All rights reserved.
+ *
+ *    bmvid is licensed under the 2-Clause BSD License except for the
+ *    third-party components.
+ *
+ *****************************************************************************/
+/* This library provides a high-level interface for controlling the BitMain
+ * Sophon VPU en/decoder.
+ */
+
+
 
 #ifndef __BM_VPU_TYPES_H__
 #define __BM_VPU_TYPES_H__
@@ -6,7 +19,7 @@
 #include <stddef.h>
 
 #ifndef bm_pa_t
-# if defined(__aarch64__) || defined(__amd64__) || defined(__x86_64__) || defined(__sw_64__) || defined(__loongarch64) || (defined(__mips__) &&(__mips == 64))
+# if defined(__aarch64__) || defined(__amd64__) || defined(__x86_64__) || defined(__sw_64__) || defined(__loongarch64) || (defined(__mips__) &&(__mips == 64)) ||  defined(__riscv)
 typedef uint64_t bm_pa_t;
 # elif _WIN32
 typedef unsigned long long  bm_pa_t;

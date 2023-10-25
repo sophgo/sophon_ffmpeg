@@ -46,9 +46,7 @@
 
 #include "bmjpuapi_jpeg.h"
 #include "bm_jpeg_common.h"
-#if defined(BM1684)
-#include "bm_ion.h"
-#endif
+#include "bmlib_runtime.h"
 
 #define FRAMEBUFFER_ALIGNMENT 16
 
@@ -66,6 +64,7 @@ typedef struct {
 
     double total_time;    /* in unit of ms */
     long   total_frame;
+    bm_handle_t handle;
 } BMJpegEncContext;
 
 typedef struct {
@@ -125,6 +124,12 @@ static av_cold int bm_jpegenc_init(AVCodecContext *avctx)
     ctx->soc_idx = 0;
 #endif
 
+    ret = bm_dev_request(&ctx->handle, ctx->soc_idx);
+    if(ret != BM_SUCCESS)
+    {
+        av_log(ctx, AV_LOG_ERROR, "bmlib create handle failed\n");
+    }
+
     av_log(avctx, AV_LOG_INFO, "width   = %d\n", avctx->width);
     av_log(avctx, AV_LOG_INFO, "height  = %d\n", avctx->height);
     av_log(avctx, AV_LOG_INFO, "pix_fmt = %s\n", av_get_pix_fmt_name(avctx->pix_fmt));
@@ -146,6 +151,9 @@ static av_cold int bm_jpegenc_init(AVCodecContext *avctx)
     else /* if (sw_pix_fmt == AV_PIX_FMT_GRAY8) */
         raw_size = avctx->width * avctx->height;
 
+    if(ctx->quality >= 95)
+        min_ratio = 1;
+
 #define BS_MASK (1024*16-1)
     bs_buffer_size = raw_size/min_ratio;
     /* bitstream buffer size in unit of 16k */
@@ -166,7 +174,7 @@ static av_cold int bm_jpegenc_init(AVCodecContext *avctx)
         return AVERROR_INVALIDDATA;
     }
 
-    bm_jpu_jpeg_enc_open(&(ctx->jpeg_encoder), NULL, bs_buffer_size, ctx->soc_idx);
+    bm_jpu_jpeg_enc_open(&(ctx->jpeg_encoder), bs_buffer_size, ctx->soc_idx);
     if (ret != BM_JPU_ENC_RETURN_CODE_OK) {
         av_log(avctx, AV_LOG_ERROR, "bm_jpu_jpeg_enc_open failed!\n");
         return AVERROR_INVALIDDATA;
@@ -211,25 +219,9 @@ static av_cold int bm_jpegenc_close(AVCodecContext *avctx)
         }
     }
 
+    bm_dev_free(ctx->handle);
     av_log(avctx, AV_LOG_TRACE, "Leave %s\n", __func__);
 
-    return 0;
-}
-
-static uint8_t* bm_wrapped_map(BmJpuWrappedDMABuffer *wrapped_dma_buffer,
-                               unsigned int flags)
-{
-    return NULL;
-}
-static void bm_wrapped_unmap(BmJpuWrappedDMABuffer *wrapped_dma_buffer)
-{
-}
-static int bm_wrapped_invalidate(BmJpuWrappedDMABuffer *wrapped_dma_buffer)
-{
-    return 0;
-}
-static int bm_wrapped_flush(BmJpuWrappedDMABuffer *wrapped_dma_buffer)
-{
     return 0;
 }
 
@@ -241,7 +233,7 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
     BMJpegEncContext* ctx = (BMJpegEncContext *)(avctx->priv_data);
     BmJpuJPEGEncParams enc_params;
     BmJpuFramebuffer framebuffer;
-    BmJpuWrappedDMABuffer wrapped_dma_buffer;
+    bm_device_mem_t wrapped_mem;
     int chroma_interleave = 0;
     BmJpuColorFormat out_color_format = BM_JPU_COLOR_FORMAT_YUV420;
     BmJpuEncReturnCodes enc_ret;
@@ -252,7 +244,7 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
     char buf[128];
     int i, ret = 0;
 #ifdef BM_PCIE_MODE
-    int size;
+    unsigned int size;
 #endif
     struct timeval ps = {0};
 
@@ -376,18 +368,9 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
         if (format != AV_PIX_FMT_GRAY8)
             total_size += c_size*2;
 
-        bm_jpu_init_wrapped_dma_buffer(&wrapped_dma_buffer);
-
-        wrapped_dma_buffer.map        = bm_wrapped_map;
-        wrapped_dma_buffer.unmap      = bm_wrapped_unmap;
-        wrapped_dma_buffer.invalidate = bm_wrapped_invalidate;
-        wrapped_dma_buffer.flush      = bm_wrapped_flush;
-
-        wrapped_dma_buffer.fd = 1;
-        /* The EXTERNAL DMA buffer filled with frame data */
-        wrapped_dma_buffer.physical_address = (unsigned long long)frame->data[0];
-        /* The size of EXTERNAL DMA buffer */
-        wrapped_dma_buffer.size = total_size;
+        wrapped_mem.u.device.device_addr = (unsigned long long)frame->data[0];
+        wrapped_mem.u.device.dmabuf_fd = 1;
+        wrapped_mem.size = total_size;
 
         framebuffer.y_stride    = frame->linesize[0];
         if (format != AV_PIX_FMT_GRAY8)
@@ -398,7 +381,7 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
         framebuffer.cb_offset   = y_size;
         framebuffer.cr_offset   = y_size + c_size;
 
-        framebuffer.dma_buffer = (BmJpuDMABuffer *)&wrapped_dma_buffer;
+        framebuffer.dma_buffer = &wrapped_mem;
     } else if (!ctx->is_dma_buffer) { // TODO
         /* The input frames come in Non-DMA memory */
         uint8_t* p_virt_addr;
@@ -441,19 +424,21 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
         framebuffer.cb_offset   = calculated_sizes.y_size;
         framebuffer.cr_offset   = calculated_sizes.y_size + calculated_sizes.cbcr_size;
 
-        /* Allocate a DMA buffer for the input pixels. */
-        framebuffer.dma_buffer = bm_jpu_dma_buffer_allocate(bm_jpu_enc_get_default_allocator(),
-                                                            calculated_sizes.total_size, 1, 0,
-                                                            ctx->soc_idx);
-        if (framebuffer.dma_buffer == NULL) {
+        if (framebuffer.dma_buffer != NULL) {
+            free (framebuffer.dma_buffer);
+            framebuffer.dma_buffer = NULL;
+        }
+        framebuffer.dma_buffer = (bm_device_mem_t*)malloc(sizeof(bm_device_mem_t));
+        ret = bm_malloc_device_byte(ctx->handle, framebuffer.dma_buffer, calculated_sizes.total_size);
+        if (ret != BM_SUCCESS) {
             av_log(avctx, AV_LOG_ERROR,
-                   "could not allocate DMA buffer for input framebuffer\n");
+                   "bm_malloc_device_byte failed.\n");
             return AVERROR(ENOMEM);
         }
 
         /* Load the input pixels into the DMA buffer */
 #ifdef BM_PCIE_MODE
-        size = bm_jpu_dma_buffer_get_size(framebuffer.dma_buffer);
+        size = bm_mem_get_device_size(*(framebuffer.dma_buffer));
         p_virt_addr = av_mallocz(size);
         if (!p_virt_addr) {
             av_log(avctx, AV_LOG_ERROR,
@@ -461,7 +446,12 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
             return AVERROR(ENOMEM);
         }
 #else
-        p_virt_addr = bm_jpu_dma_buffer_map(framebuffer.dma_buffer, BM_JPU_MAPPING_FLAG_WRITE);
+        ret = bm_mem_mmap_device_mem(ctx->handle, framebuffer.dma_buffer, &p_virt_addr);
+        if (ret != BM_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR,
+                   "bm_mem_mmap_device_mem failed!\n");
+            return AVERROR(ENOMEM);
+        }
 #endif
         dst_y = p_virt_addr + framebuffer. y_offset;
         dst_u = p_virt_addr + framebuffer.cb_offset;
@@ -489,14 +479,28 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
                           format, width, height);
         }
 #ifdef BM_PCIE_MODE
-        ret = bm_jpu_dma_buffer_upload_data(framebuffer.dma_buffer, p_virt_addr, size);
+        ret = bm_memcpy_s2d_partial(ctx->handle, *(framebuffer.dma_buffer), p_virt_addr, size);
+        if (ret != BM_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR,
+                   "bm_memcpy_s2d_partial failed!\n");
+            return AVERROR(ENOMEM);
+        }
         av_free(p_virt_addr);
 #else
         /* Flush cache to DMA buffer */
-        bm_jpu_dma_buffer_flush(framebuffer.dma_buffer);
-
+        ret = bm_mem_flush_device_mem(ctx->handle, framebuffer.dma_buffer);
+        if (ret != BM_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR,
+                   "bm_mem_flush_partial_device_mem failed!\n");
+            return AVERROR(ENOMEM);
+        }
         /* Unmap the DMA buffer of the raw frame */
-        bm_jpu_dma_buffer_unmap(framebuffer.dma_buffer);
+        ret = bm_mem_unmap_device_mem(ctx->handle, (void *)p_virt_addr, framebuffer.dma_buffer->size);
+        if (ret != BM_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR,
+                   "bm_mem_unmap_device_mem failed!\n");
+            return AVERROR(ENOMEM);
+        }
 #endif
     } else { /* The input frames come from DMA memory defined by user */
         int y_size, c_size, total_size;
@@ -529,18 +533,9 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
         if (format != AV_PIX_FMT_GRAY8)
             total_size += c_size*2;
 
-        bm_jpu_init_wrapped_dma_buffer(&wrapped_dma_buffer);
-
-        wrapped_dma_buffer.map        = bm_wrapped_map;
-        wrapped_dma_buffer.unmap      = bm_wrapped_unmap;
-        wrapped_dma_buffer.invalidate = bm_wrapped_invalidate;
-        wrapped_dma_buffer.flush      = bm_wrapped_flush;
-
-        wrapped_dma_buffer.fd = 1;
-        /* The EXTERNAL DMA buffer filled with frame data */
-        wrapped_dma_buffer.physical_address = (unsigned long long)frame->data[4];
-        /* The size of EXTERNAL DMA buffer */
-        wrapped_dma_buffer.size = total_size;
+        wrapped_mem.u.device.device_addr = (unsigned long long)frame->data[4];
+        wrapped_mem.u.device.dmabuf_fd = 1;
+        wrapped_mem.size = total_size;
 
         framebuffer.y_stride    = frame->linesize[4];
         if (format != AV_PIX_FMT_GRAY8)
@@ -551,7 +546,7 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
         framebuffer.cb_offset   = y_size;
         framebuffer.cr_offset   = y_size + c_size;
 
-        framebuffer.dma_buffer = (BmJpuDMABuffer *)&wrapped_dma_buffer;
+        framebuffer.dma_buffer = &wrapped_mem;
     }
 
     bs_buffer.avctx = avctx;
@@ -576,8 +571,13 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
 
     /* The framebuffer's DMA buffer isn't needed anymore, since we just
      * did the encoding, so deallocate it */
-    if (!ctx->is_dma_buffer)
-        bm_jpu_dma_buffer_deallocate(framebuffer.dma_buffer);
+    if (!ctx->is_dma_buffer) {
+        bm_free_device(ctx->handle, *(framebuffer.dma_buffer));
+        if (framebuffer.dma_buffer != NULL) {
+            free(framebuffer.dma_buffer);
+            framebuffer.dma_buffer = NULL;
+        }
+    }
 
     if (enc_ret != BM_JPU_ENC_RETURN_CODE_OK) {
         av_log(avctx, AV_LOG_ERROR, "could not encode this image : %s\n",

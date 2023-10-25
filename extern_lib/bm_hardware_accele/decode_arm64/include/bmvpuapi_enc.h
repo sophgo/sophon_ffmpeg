@@ -1,23 +1,15 @@
-/* bmvpuapi API library for the BitMain Sophon SoC
+/*****************************************************************************
  *
- * Copyright (C) 2018 Solan Shang
- * Copyright (C) 2015 Carlos Rafael Giani
+ *    Copyright (C) 2022 Sophgo Technologies Inc.  All rights reserved.
  *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
+ *    bmvid is licensed under the 2-Clause BSD License except for the
+ *    third-party components.
  *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301
- * USA
+ *****************************************************************************/
+/* This library provides a high-level interface for controlling the BitMain
+ * Sophon VPU en/decoder.
  */
+
 
 #ifndef __BMVPUAPI_ENC_H__
 #define __BMVPUAPI_ENC_H__
@@ -26,7 +18,7 @@
 #include <stdint.h>
 
 #if defined(_WIN32) || defined(WIN32) || defined(__WIN32__)
-#define ATTRIBUTE 
+#define ATTRIBUTE
 #define DECL_EXPORT __declspec(dllexport)
 #define DECL_IMPORT __declspec(dllimport)
 #else
@@ -320,10 +312,6 @@ typedef struct
      * See the BmVpuColorFormat documentation for the consequences of this. */
     int chroma_interleave;
 
-    /* Allocator for external DMA buffers.
-     * If this is NULL, bmvpu_get_default_allocator() is used. */
-    BmVpuDMABufferAllocator *ext_dmabuffers_allocator;
-
     /* only used for PCIE mode. For SOC mode, this must be 0.
      * Default value is 0. */
     int soc_idx;
@@ -461,13 +449,15 @@ typedef struct
     void *output_buffer_context;
     int  customMapOptUsedIndex;
     BmCustomMapOpt* customMapOpt;
-    BmVpuDMABuffer** roi_dma_buffer;
+
+    bm_device_mem_t** roi_dma_buffer;
 } BmVpuEncParams;
 
 /* BM VPU Encoder structure. */
 typedef struct
 {
     void* handle;
+    bm_handle_t bm_handle;
 
     int soc_idx; /* The index of Sophon SoC.
                   * For PCIE mode, please refer to the number at /dev/bm-sophonxx.
@@ -491,14 +481,15 @@ typedef struct
     int cqp;
 
     /* DMA buffer allocator */
-    BmVpuDMABufferAllocator *dmabuffers_allocator;
+    // BmVpuDMABufferAllocator *dmabuffers_allocator; //Deprecated, now use bmlib
 
     /* DMA buffer for working */
-    BmVpuDMABuffer*   work_dmabuffer;
+    bm_device_mem_t*   work_dmabuffer;
 
     /* DMA buffer for bitstream */
-    BmVpuDMABuffer*   bs_dmabuffer;
-    uint8_t*          bs_virt_addr;
+    bm_device_mem_t* bs_dmabuffer;
+
+    unsigned long long bs_virt_addr;
     bmvpu_phys_addr_t bs_phys_addr;
 
     /* DMA buffer for frame data */
@@ -508,16 +499,16 @@ typedef struct
 
     /* TODO change all as the parameters of bmvpu_enc_register_framebuffers() */
     /* DMA buffer for colMV */
-    BmVpuDMABuffer*   dmabuffer_mv;
+    bm_device_mem_t*   buffer_mv;
 
     /* DMA buffer for FBC luma table */
-    BmVpuDMABuffer*   dmabuffer_fbc_y_tbl;
+    bm_device_mem_t*   buffer_fbc_y_tbl;
 
     /* DMA buffer for FBC chroma table */
-    BmVpuDMABuffer*   dmabuffer_fbc_c_tbl;
+    bm_device_mem_t*   buffer_fbc_c_tbl;
 
     /* Sum-sampled DMA buffer for ME */
-    BmVpuDMABuffer*   dmabuffer_sub_sam;
+    bm_device_mem_t*   buffer_sub_sam;
 
     uint8_t* headers_rbsp;
     size_t   headers_rbsp_size;
@@ -544,6 +535,13 @@ DECL_EXPORT int bmvpu_enc_get_core_idx(int soc_idx);
 DECL_EXPORT int bmvpu_enc_load(int soc_idx);
 DECL_EXPORT int bmvpu_enc_unload(int soc_idx);
 
+/*
+ * If a bm_handle_t on this soc already exists, return it directly,
+ * otherwise return NULL. This function should be called after bmvpu_enc_load()
+ * is called, otherwise it is possibily that there is not bm_handle_t on that soc.
+ */
+DECL_EXPORT bm_handle_t bmvpu_enc_get_bmlib_handle(int soc_idx);
+
 /* Called before bmvpu_enc_open(), it returns the alignment and size for the
  * physical memory block necessary for the encoder's bitstream buffer.
  * The user must allocate a DMA buffer of at least this size, and its physical
@@ -557,7 +555,7 @@ DECL_EXPORT void bmvpu_enc_set_default_open_params(BmVpuEncOpenParams *open_para
 /* Opens a new encoder instance.
  * "open_params" and "bs_dmabuffer" must not be NULL. */
 DECL_EXPORT int bmvpu_enc_open(BmVpuEncoder **encoder, BmVpuEncOpenParams *open_params,
-                   BmVpuDMABuffer *bs_dmabuffer);
+                   bm_device_mem_t *bs_dmabuffer);
 
 /* Closes a encoder instance.
  * Trying to close the same instance multiple times results in undefined behavior. */

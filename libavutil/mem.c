@@ -42,9 +42,6 @@
 #include "dynarray.h"
 #include "intreadwrite.h"
 #include "mem.h"
-#if defined(BM1684)
-#include "bm_ion.h"
-#endif
 
 #ifdef MALLOC_PREFIX
 
@@ -510,48 +507,48 @@ void av_fast_mallocz(void *ptr, unsigned int *size, size_t min_size)
     ff_fast_malloc(ptr, size, min_size, 1);
 }
 
-int av_ion_open(int cardid)
-{
-    int ret = 0;
-#if defined(BM1684)
-    ret = bm_ion_allocator_open(cardid);
-    if (ret < 0) {
-        fprintf(stderr, "bm_ion_allocator_open failed\n");
-        return -1;
-    }
-#endif
-    return ret;
-}
+// int av_ion_open(int cardid)
+// {
+//     int ret = 0;
+// #if defined(BM1684)
+//     ret = bm_ion_allocator_open(cardid);
+//     if (ret < 0) {
+//         fprintf(stderr, "bm_ion_allocator_open failed\n");
+//         return -1;
+//     }
+// #endif
+//     return ret;
+// }
 
-int av_ion_close(int cardid)
-{
-    int ret = 0;
-#if defined(BM1684)
-    ret = bm_ion_allocator_close(cardid);
-#endif
-    return ret;
-}
+// int av_ion_close(int cardid)
+// {
+//     int ret = 0;
+// #if defined(BM1684)
+//     ret = bm_ion_allocator_close(cardid);
+// #endif
+//     return ret;
+// }
 
 
-void* av_ion_malloc(size_t size_in, int flag, int cardid)
-{
-#if defined(BM1684)
-    bm_ion_buffer_t* dev_buf = NULL;
-    dev_buf = bm_ion_allocate_buffer(cardid, size_in, flag<<4);
-    if (dev_buf == NULL) {
-        fprintf(stderr, "bm_ion_allocate_buffer failed\n");
-    }
-    return (void*)dev_buf;
-#else
-    return NULL;
-#endif
-}
+// void* av_ion_malloc(size_t size_in, int flag, int cardid)
+// {
+// #if defined(BM1684)
+//     bm_ion_buffer_t* dev_buf = NULL;
+//     dev_buf = bm_ion_allocate_buffer(cardid, size_in, flag<<4);
+//     if (dev_buf == NULL) {
+//         fprintf(stderr, "bm_ion_allocate_buffer failed\n");
+//     }
+//     return (void*)dev_buf;
+// #else
+//     return NULL;
+// #endif
+// }
 
-void av_ion_free(void *dev_buf)
-{
-#if defined(BM1684)
-    bm_ion_buffer_t* p = (bm_ion_buffer_t*)dev_buf;
-    bm_ion_free_buffer(p);
-#endif
-    return;
-}
+// void av_ion_free(void *dev_buf)
+// {
+// #if defined(BM1684)
+//     bm_ion_buffer_t* p = (bm_ion_buffer_t*)dev_buf;
+//     bm_ion_free_buffer(p);
+// #endif
+//     return;
+// }
