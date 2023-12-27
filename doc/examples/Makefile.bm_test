@@ -1,0 +1,29 @@
+# use pkg-config for getting CFLAGS and LDLIBS
+FFMPEG_LIBS=    -L../../libavdevice/ -lavdevice                        \
+                -L../../libavformat/ -lavformat                        \
+                -L../../libavfilter/ -lavfilter                        \
+                -L../../libavcodec/ -lavcodec                          \
+                -L../../libswresample/ -lswresample                    \
+                -L../../libswscale/ -lswscale                          \
+                -L../../libavutil/ -lavutil                            \
+                -L../../libpostproc/ -lpostproc                        \
+                -L../../../install/soc_bm1682_box_4g/decode/lib/       \
+                -lbmvideo -lbmjpulite -l bmjpuapi
+
+CFLAGS += -Wall -g
+# CFLAGS := $(shell pkg-config --cflags $(FFMPEG_LIBS)) $(CFLAGS)
+# LDLIBS := $(shell pkg-config --libs $(FFMPEG_LIBS)) $(LDLIBS)
+LDLIBS := $(FFMPEG_LIBS) -lm -lpthread
+#EXAMPLES=       demuxing_decoding_bm
+
+#OBJS=$(addsuffix .o,$(EXAMPLES))
+
+.phony: all clean
+
+#all: $(OBJS) $(EXAMPLES)
+all:
+	aarch64-linux-gnu-gcc -o bm_test_g bm_test.c $(LDLIBS) -I../../
+#-fsanitize=address -fno-omit-frame-pointer -fsanitize-recover=address -lasan
+	aarch64-linux-gnu-strip -o bm_test bm_test_g
+clean: clean-test
+	$(RM) $(EXAMPLES) $(OBJS)

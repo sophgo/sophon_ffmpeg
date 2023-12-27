@@ -1,0 +1,23 @@
+# use pkg-config for getting CFLAGS and LDLIBS
+FFMPEG_LIBS=    -L../../libavdevice/ -lavdevice                        \
+                -L../../libavformat/ -lavformat                        \
+                -L../../libavfilter/ -lavfilter                        \
+                -L../../libavcodec/ -lavcodec                          \
+                -L../../libswresample/ -lswresample                    \
+                -L../../libswscale/ -lswscale                          \
+                -L../../libavutil/ -lavutil                            \
+                -L../../libpostproc/ -lpostproc                        \
+				-L../../../install/soc_bm1682_box_4g/decode/lib/       \
+				-lvideo_bm -lbmjpulite -l bmjpuapi
+
+CFLAGS += -Wall -g
+LDLIBS := $(FFMPEG_LIBS) -lm -lpthread
+
+.phony: all clean
+
+all:
+	aarch64-linux-gnu-gcc -o avio_decode_jpeg_g avio_decode_jpeg.c $(LDLIBS) -I../../
+	aarch64-linux-gnu-strip -o avio_decode_jpeg avio_decode_jpeg_g
+
+clean: clean-test
+	$(RM) $(EXAMPLES) $(OBJS)

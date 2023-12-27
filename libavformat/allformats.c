@@ -549,6 +549,8 @@ extern const AVInputFormat  ff_image_webp_pipe_demuxer;
 extern const AVInputFormat  ff_image_xbm_pipe_demuxer;
 extern const AVInputFormat  ff_image_xpm_pipe_demuxer;
 extern const AVInputFormat  ff_image_xwd_pipe_demuxer;
+extern const AVInputFormat  ff_gb28181_demuxer;
+extern const AVInputFormat  ff_gb28181pb_demuxer;
 
 /* external libraries */
 extern const FFOutputFormat ff_chromaprint_muxer;

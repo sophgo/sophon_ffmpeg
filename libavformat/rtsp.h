@@ -416,6 +416,10 @@ typedef struct RTSPState {
 
     char default_lang[4];
     int buffer_size;
+    /**
+     * keep original timestamp
+     */
+    int keep_rtsp_timestamp;
     int pkt_size;
     char *localaddr;
 } RTSPState;

@@ -329,6 +329,7 @@ External library support:
   --disable-vulkan         disable Vulkan code [autodetect]
   --disable-xlib           disable xlib [autodetect]
   --disable-zlib           disable zlib [autodetect]
+  --enable-bmcodec         enable Bitmain hardware Codec support [no]
 
   The following libraries provide various hardware acceleration features:
   --disable-amf            disable AMF video encoding code [autodetect]
@@ -1712,6 +1713,8 @@ COMPONENT_LIST="
 EXAMPLE_LIST="
     avio_http_serve_files_example
     avio_list_dir_example
+    bmcodec_scale_example
+    bmcodec_transcode_example
     avio_read_callback_example
     decode_audio_example
     decode_filter_audio_example
@@ -1878,6 +1881,7 @@ EXTERNAL_LIBRARY_LIST="
 HWACCEL_AUTODETECT_LIBRARY_LIST="
     amf
     audiotoolbox
+    bmcodec
     crystalhd
     cuda
     cuda_llvm
@@ -3154,6 +3158,14 @@ amf_deps_any="libdl LoadLibrary"
 nvenc_deps="ffnvcodec"
 nvenc_deps_any="libdl LoadLibrary"
 
+# TODO
+#h264_bm_decoder_deps="bmcodec"
+#hevc_bm_decoder_deps="bmcodec"
+h264_bm_decoder_select="h264_mp4toannexb_bsf h264_parser"
+hevc_bm_decoder_select="hevc_mp4toannexb_bsf hevc_parser"
+h264_bm_encoder_deps="bmcodec"
+hevc_bm_encoder_deps="bmcodec"
+bmx264_encoder_deps="bmcodec"
 aac_mf_encoder_deps="mediafoundation"
 ac3_mf_encoder_deps="mediafoundation"
 av1_cuvid_decoder_deps="cuvid CUVIDAV1PICPARAMS"
@@ -3723,6 +3735,7 @@ rubberband_filter_deps="librubberband"
 sab_filter_deps="gpl swscale"
 scale2ref_filter_deps="swscale"
 scale_filter_deps="swscale"
+scale_bm_filter_deps="bmcodec"
 scale_qsv_filter_deps="libmfx"
 scale_qsv_filter_select="qsvvpp"
 scdet_filter_select="scene_sad"
@@ -3778,11 +3791,13 @@ vstack_qsv_filter_deps="libmfx"
 vstack_qsv_filter_select="qsvvpp"
 xstack_qsv_filter_deps="libmfx"
 xstack_qsv_filter_select="qsvvpp"
-
+scale_bm_filter_deps="bmcodec"
 # examples
 avio_http_serve_files_deps="avformat avutil fork"
 avio_list_dir_deps="avformat avutil"
 avio_read_callback_deps="avformat avcodec avutil"
+bmcodec_scale_example_deps="avcodec avformat avutil avfilter h264_bm_decoder hevc_bm_decoder h264_bm_encoder h265_bm_encoder"
+bmcodec_transcode_example_deps="avcodec avformat avutil h264_bm_decoder hevc_bm_decoder h264_bm_encoder h265_bm_encoder"
 decode_audio_example_deps="avcodec avutil"
 decode_filter_audio_example_deps="avfilter avcodec avformat avutil"
 decode_filter_video_example_deps="avfilter avcodec avformat avutil"
@@ -6549,6 +6564,7 @@ for func in $MATH_FUNCS; do
 done
 
 # these are off by default, so fail if requested and not available
+enabled bmcodec
 enabled avisynth          && { require_headers "avisynth/avisynth_c.h avisynth/avs/version.h" &&
                                { test_cpp_condition avisynth/avs/version.h "AVS_MAJOR_VER >= 3 && AVS_MINOR_VER >= 7 && AVS_BUGFIX_VER >= 1 || AVS_MAJOR_VER >= 3 && AVS_MINOR_VER > 7 || AVS_MAJOR_VER > 3" ||
                                  die "ERROR: AviSynth+ header version must be >= 3.7.1"; } }

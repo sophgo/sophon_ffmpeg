@@ -24,6 +24,7 @@
 
 #include <stdint.h>
 #include "libavutil/intreadwrite.h"
+#include "avformat.h"
 
 #define PACK_START_CODE             ((unsigned int)0x000001ba)
 #define SYSTEM_HEADER_START_CODE    ((unsigned int)0x000001bb)
@@ -71,4 +72,10 @@ static inline int64_t ff_parse_pes_pts(const uint8_t *buf) {
              AV_RB16(buf+3) >> 1;
 }
 
+typedef struct MpegPsDemuxContext MpegPsDemuxContext;
+
+MpegPsDemuxContext *avpriv_mpegps_parse_open(AVFormatContext *s);
+void avpriv_mpegps_parse_close(MpegPsDemuxContext *ps);
+int avpriv_mpegps_parse_packet(AVFormatContext *s,MpegPsDemuxContext *ps,
+	       	AVPacket *pkt, const uint8_t *psbuf, int psbuflen);
 #endif /* AVFORMAT_MPEG_H */

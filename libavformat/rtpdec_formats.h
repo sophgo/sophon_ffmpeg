@@ -74,6 +74,7 @@ extern const RTPDynamicProtocolHandler ff_mpeg_audio_robust_dynamic_handler;
 extern const RTPDynamicProtocolHandler ff_mpeg_video_dynamic_handler;
 extern const RTPDynamicProtocolHandler ff_mpeg4_generic_dynamic_handler;
 extern const RTPDynamicProtocolHandler ff_mpegts_dynamic_handler;
+extern const RTPDynamicProtocolHandler ff_mpegps_dynamic_handler;
 extern const RTPDynamicProtocolHandler ff_ms_rtp_asf_pfa_handler;
 extern const RTPDynamicProtocolHandler ff_ms_rtp_asf_pfv_handler;
 extern const RTPDynamicProtocolHandler ff_qcelp_dynamic_handler;

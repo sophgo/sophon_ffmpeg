@@ -2829,6 +2829,15 @@ static int init_input_stream(InputStream *ist, char *error, int error_len)
                      ist->file_index, ist->st->index, av_err2str(ret));
             return ret;
         }
+#if !defined(BM1684) && defined(BM_PCIE_MODE)
+        if (sophon_device_index >= 0 && codec->wrapper_name != NULL && strcmp(codec->wrapper_name, "bm") == 0) {
+            av_log(NULL, AV_LOG_TRACE, "[%s,%d] set decoder at sophon device %d\n",
+                   __func__, __LINE__, sophon_device_index);
+            av_dict_set_int(&ist->decoder_opts, "sophon_idx", sophon_device_index, 0);
+        }
+        if (codec->wrapper_name != NULL && strcmp(codec->wrapper_name, "bm") == 0)
+            av_dict_set_int(&ist->decoder_opts, "zero_copy", zero_copy, 0);
+#endif
 
         if ((ret = avcodec_open2(ist->dec_ctx, codec, &ist->decoder_opts)) < 0) {
             if (ret == AVERROR_EXPERIMENTAL)
@@ -3230,6 +3239,13 @@ static int init_output_stream(OutputStream *ost, AVFrame *frame,
             return ret;
         }
 
+#if !defined(BM1684) && defined(BM_PCIE_MODE)
+        if (sophon_device_index >= 0 && codec->wrapper_name != NULL && strcmp(codec->wrapper_name, "bm") == 0) {
+            av_log(NULL, AV_LOG_TRACE, "[%s,%d] set encoder at sophon device %d\n",
+                   __func__, __LINE__, sophon_device_index);
+            av_dict_set_int(&ost->encoder_opts, "sophon_idx", sophon_device_index, 0);
+        }
+#endif
         if ((ret = avcodec_open2(ost->enc_ctx, codec, &ost->encoder_opts)) < 0) {
             if (ret == AVERROR_EXPERIMENTAL)
                 abort_codec_experimental(codec, 1);

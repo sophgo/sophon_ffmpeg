@@ -70,6 +70,7 @@ enum HWAccelID {
     HWACCEL_NONE = 0,
     HWACCEL_AUTO,
     HWACCEL_GENERIC,
+    HWACCEL_BMCODEC,
 };
 
 typedef struct HWDevice {
@@ -724,6 +725,10 @@ extern char *sdp_filename;
 extern float audio_drift_threshold;
 extern float dts_delta_threshold;
 extern float dts_error_threshold;
+#if !defined(BM1684) && defined(BM_PCIE_MODE)
+extern int sophon_device_index;
+extern int zero_copy;
+#endif
 
 extern enum VideoSyncMethod video_sync_method;
 extern float frame_drop_threshold;

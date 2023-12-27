@@ -218,6 +218,48 @@ FF_ENABLE_DEPRECATION_WARNINGS
     return 0;
 }
 
+static void set_inst_info_to_vpu(AVFormatContext *s, unsigned long st)
+{
+    return;
+    FILE *fp = NULL;
+#ifdef BM_PCIE_MODE
+    char vpu_name[] = "/proc/vpuinfo";
+    char vpuinfo_name[32] = {0};
+    int vpuinfo_idx = -1;
+    AVDictionaryEntry *e;
+
+    e = av_dict_get(s->metadata, "sophon_idx", NULL, 0);
+    if (!e) {
+        e = av_dict_get(s->metadata, "pcie_board_id", NULL, 0);
+    }
+    if (e) {
+        vpuinfo_idx = atoi(e->value);
+    }
+    if (vpuinfo_idx < 0)
+        return;
+
+    sprintf(vpuinfo_name, "%s%d", vpu_name, vpuinfo_idx);
+    fp = fopen(vpuinfo_name, "w");
+#else
+    fp = fopen("/proc/vpuinfo", "w");
+#endif
+
+    if (fp == NULL) {
+        av_log(s, AV_LOG_ERROR, "can not open /proc/vpuinfo.\n");
+        return;
+    }
+
+    {
+        char *p_str = av_asprintf("%ld %ld %ld, %s", (unsigned long)s, av_gettime(), st, s->url);
+        int str_len = strlen(p_str);
+        if(fwrite(p_str, 1, str_len, fp) != str_len){
+            av_log(s, AV_LOG_ERROR, "can not write /proc/vpuinfo.\n");
+        }
+        av_free(p_str);
+        fclose(fp);
+    }
+}
+
 int avformat_open_input(AVFormatContext **ps, const char *filename,
                         const AVInputFormat *fmt, AVDictionary **options)
 {
@@ -351,6 +393,7 @@ int avformat_open_input(AVFormatContext **ps, const char *filename,
         *options = tmp;
     }
     *ps = s;
+    // set_inst_info_to_vpu(s, 0);
     return 0;
 
 close:
@@ -1236,6 +1279,7 @@ static int read_frame_internal(AVFormatContext *s, AVPacket *pkt)
     FFFormatContext *const si = ffformatcontext(s);
     int ret, got_packet = 0;
     AVDictionary *metadata = NULL;
+    int is_lost = 0;
 
     while (!got_packet && !si->parse_queue.head) {
         AVStream *st;
@@ -1243,6 +1287,10 @@ static int read_frame_internal(AVFormatContext *s, AVPacket *pkt)
 
         /* read next packet */
         ret = ff_read_packet(s, pkt);
+        if (0 == is_lost) {
+          //syj--
+          is_lost = (pkt->flags & AV_PKT_FLAG_CORRUPT);
+        }
         if (ret < 0) {
             if (ret == AVERROR(EAGAIN))
                 return ret;
@@ -1432,6 +1480,10 @@ FF_ENABLE_DEPRECATION_WARNINGS
      * propagate this back to the user. */
     if (ret == AVERROR_EOF && s->pb && s->pb->error < 0 && s->pb->error != AVERROR(EAGAIN))
         ret = s->pb->error;
+    if (is_lost) {
+        av_log(s, AV_LOG_DEBUG, "set pkt.is_lost 1\n");
+        pkt->flags |= AV_PKT_FLAG_CORRUPT;
+    }
 
     return ret;
 }
@@ -1449,7 +1501,7 @@ int av_read_frame(AVFormatContext *s, AVPacket *pkt)
               ? avpriv_packet_list_get(&si->packet_buffer, pkt)
               : read_frame_internal(s, pkt);
         if (ret < 0)
-            return ret;
+            goto return_error;
         goto return_packet;
     }
 
@@ -1505,14 +1557,14 @@ int av_read_frame(AVFormatContext *s, AVPacket *pkt)
                 eof = 1;
                 continue;
             } else
-                return ret;
+            goto return_error;
         }
 
         ret = avpriv_packet_list_put(&si->packet_buffer,
                                      pkt, NULL, 0);
         if (ret < 0) {
             av_packet_unref(pkt);
-            return ret;
+            goto return_error;
         }
     }
 
@@ -1528,7 +1580,10 @@ return_packet:
     if (is_relative(pkt->pts))
         pkt->pts -= RELATIVE_TS_BASE;
 
+return_error:
+    // set_inst_info_to_vpu(s, 1);
     return ret;
+
 }
 
 /**

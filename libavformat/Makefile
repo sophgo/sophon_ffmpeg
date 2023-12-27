@@ -58,6 +58,7 @@ OBJS-$(CONFIG_RTPDEC)                    += rdt.o                       \
                                             rtpdec_mpeg12.o             \
                                             rtpdec_mpeg4.o              \
                                             rtpdec_mpegts.o             \
+											rtpdec_mpegps.o             \
                                             rtpdec_qcelp.o              \
                                             rtpdec_qdm2.o               \
                                             rtpdec_qt.o                 \
@@ -631,6 +632,7 @@ OBJS-$(CONFIG_XWMA_DEMUXER)              += xwma.o
 OBJS-$(CONFIG_YOP_DEMUXER)               += yop.o
 OBJS-$(CONFIG_YUV4MPEGPIPE_DEMUXER)      += yuv4mpegdec.o
 OBJS-$(CONFIG_YUV4MPEGPIPE_MUXER)        += yuv4mpegenc.o
+OBJS-$(CONFIG_GB28181_DEMUXER)           += gb28181_media.o gb28181_realplay.o gb28181_sip.o gb28181_playback.o
 
 # external library muxers/demuxers
 OBJS-$(CONFIG_AVISYNTH_DEMUXER)          += avisynth.o

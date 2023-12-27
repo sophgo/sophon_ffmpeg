@@ -307,6 +307,9 @@ typedef struct VideoState {
 } VideoState;
 
 /* options specified by the user */
+#ifdef BM_PCIE_MODE
+static int ffplay_pcie_board_id = -1;
+#endif
 static const AVInputFormat *file_iformat;
 static const char *input_filename;
 static const char *window_title;

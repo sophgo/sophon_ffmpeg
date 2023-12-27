@@ -628,14 +628,17 @@ static void add_input_streams(const OptionsContext *o, Demuxer *d)
         MATCH_PER_STREAM_OPT(codec_tags, str, codec_tag, ic, st);
         if (codec_tag) {
             uint32_t tag = strtol(codec_tag, &next, 0);
-            if (*next)
-                tag = AV_RL32(codec_tag);
+            if (*next) {
+                uint8_t buf[4] = { 0 };
+                memcpy(buf, codec_tag, FFMIN(sizeof(buf), strlen(codec_tag)));
+                tag = AV_RL32(buf);
+            }
+
             st->codecpar->codec_tag = tag;
         }
 
         if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             add_display_matrix_to_stream(o, ic, st);
-
             MATCH_PER_STREAM_OPT(hwaccels, str, hwaccel, ic, st);
             MATCH_PER_STREAM_OPT(hwaccel_output_formats, str,
                                  hwaccel_output_format, ic, st);
@@ -652,6 +655,9 @@ static void add_input_streams(const OptionsContext *o, Demuxer *d)
                     "with old commandlines. This behaviour is DEPRECATED and will be removed "
                     "in the future. Please explicitly set \"-hwaccel_output_format qsv\".\n");
                 ist->hwaccel_output_format = AV_PIX_FMT_QSV;
+            } else if (!hwaccel_output_format && hwaccel && !strcmp(hwaccel, "bmcodec")) {
+
+                ist->hwaccel_output_format = AV_PIX_FMT_BMCODEC;
             } else if (!hwaccel_output_format && hwaccel && !strcmp(hwaccel, "mediacodec")) {
                 // There is no real AVHWFrameContext implementation. Set
                 // hwaccel_output_format to avoid av_hwframe_transfer_data error.
@@ -959,6 +965,14 @@ int ifile_open(const OptionsContext *o, const char *filename)
         av_dict_set(&o->g->format_opts, "scan_all_pmts", "1", AV_DICT_DONT_OVERWRITE);
         scan_all_pmts_set = 1;
     }
+
+#if !defined(BM1684) && defined(BM_PCIE_MODE)
+    if (sophon_device_index >= 0)
+        av_dict_set_int(&ic->metadata, "sophon_idx", sophon_device_index, 0);
+    else
+        av_dict_set_int(&ic->metadata, "sophon_idx", 0, 0);
+#endif
+
     /* open the input file with generic avformat function */
     err = avformat_open_input(&ic, filename, file_iformat, &o->g->format_opts);
     if (err < 0) {

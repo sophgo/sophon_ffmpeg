@@ -106,6 +106,7 @@ static const RTPDynamicProtocolHandler *const rtp_dynamic_protocol_handler_list[
     &ff_mpeg_video_dynamic_handler,
     &ff_mpeg4_generic_dynamic_handler,
     &ff_mpegts_dynamic_handler,
+    &ff_mpegps_dynamic_handler,
     &ff_ms_rtp_asf_pfa_handler,
     &ff_ms_rtp_asf_pfv_handler,
     &ff_qcelp_dynamic_handler,
@@ -690,7 +691,10 @@ static void finalize_packet(RTPDemuxContext *s, AVPacket *pkt, uint32_t timestam
     else
         s->unwrapped_timestamp += (int32_t)(timestamp - s->timestamp);
     s->timestamp = timestamp;
-    pkt->pts     = s->unwrapped_timestamp + s->range_start_offset -
+    if (s->reuse_source_timestamp)
+      pkt->pts = timestamp;
+    else
+        pkt->pts     = s->unwrapped_timestamp + s->range_start_offset -
                    s->base_timestamp;
 }
 
@@ -831,6 +835,7 @@ static int rtp_parse_queued_packet(RTPDemuxContext *s, AVPacket *pkt)
 {
     int rv;
     RTPPacket *next;
+    int is_lost = 0;
 
     if (s->queue_len <= 0)
         return -1;
@@ -842,6 +847,7 @@ static int rtp_parse_queued_packet(RTPDemuxContext *s, AVPacket *pkt)
             pkt_missed += UINT16_MAX;
         av_log(s->ic, AV_LOG_WARNING,
                "RTP: missed %d packets\n", pkt_missed);
+        is_lost = 1;
     }
 
     /* Parse the first packet in the queue, and dequeue it */
@@ -851,6 +857,8 @@ static int rtp_parse_queued_packet(RTPDemuxContext *s, AVPacket *pkt)
     av_freep(&s->queue);
     s->queue = next;
     s->queue_len--;
+    if (is_lost)
+       pkt->flags |= AV_PKT_FLAG_CORRUPT;
     return rv;
 }
 

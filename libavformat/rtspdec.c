@@ -557,6 +557,13 @@ static int rtsp_read_play(AVFormatContext *s)
                 rtpctx->timestamp           = 0;
                 rtpctx->unwrapped_timestamp = 0;
                 rtpctx->rtcp_ts_offset      = 0;
+                {
+                  av_log(s, AV_LOG_INFO, "KEEP_RTSP_TIMESTAMP=%d applied\n", rt->keep_rtsp_timestamp);
+                  if (rt->keep_rtsp_timestamp)
+                    rtpctx->reuse_source_timestamp = 1;
+                  else
+                    rtpctx->reuse_source_timestamp = 0;
+                }
             }
         }
         if (rt->state == RTSP_STATE_PAUSED) {

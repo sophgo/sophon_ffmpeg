@@ -27,6 +27,7 @@
 #include "libavutil/mem.h"
 #include "avcodec.h"
 #include "codec_par.h"
+#include "config_components.h"
 
 static void codec_parameters_reset(AVCodecParameters *par)
 {
@@ -179,6 +180,71 @@ FF_ENABLE_DEPRECATION_WARNINGS
     return 0;
 }
 
+//in bm decoder we set the default output format to nv12
+static const char* bm_find_decoder_name(int dec_id)
+{
+    switch (dec_id) {
+#if CONFIG_JPEG_BM_DECODER
+        case AV_CODEC_ID_MJPEG:     return "jpeg_bm";
+#endif
+#if CONFIG_H264_BM_DECODER
+        case AV_CODEC_ID_H264:      return "h264_bm";
+#endif
+#if CONFIG_HEVC_BM_DECODER
+        case AV_CODEC_ID_HEVC:      return "hevc_bm";
+#endif
+#if CONFIG_MPEG1_BM_DECODER
+        case AV_CODEC_ID_MPEG1VIDEO:return "mpeg1_bm";
+#endif
+#if CONFIG_MPEG2_BM_DECODER
+        case AV_CODEC_ID_MPEG2VIDEO:return "mpeg2_bm";
+#endif
+#if CONFIG_MPEG4_BM_DECODER
+        case AV_CODEC_ID_MPEG4:     return "mpeg4_bm";
+#endif
+#if CONFIG_MPEG4V3_BM_DECODER
+        case AV_CODEC_ID_MSMPEG4V3: return "mpeg4v3_bm";
+#endif
+#if CONFIG_FLV1_BM_DECODER
+        case AV_CODEC_ID_FLV1:      return "flv1_bm";
+#endif
+
+#if CONFIG_H263_BM_DECODER
+        case AV_CODEC_ID_H263:      return "h263_bm";
+#endif
+
+#if CONFIG_CAVS_BM_DECODER
+        case AV_CODEC_ID_CAVS:      return "cavs_bm";
+#endif
+#if CONFIG_AVS_BM_DECODER
+        case AV_CODEC_ID_AVS:       return "avs_bm";
+#endif
+
+#if CONFIG_VP3_BM_DECODER
+        case AV_CODEC_ID_VP3:       return "vp3_bm";
+#endif
+#if CONFIG_VP8_BM_DECODER
+    case AV_CODEC_ID_VP8:       return "vp8_bm";
+#endif
+#if CONFIG_VC1_BM_DECODER
+        case AV_CODEC_ID_VC1:       return "vc1_bm";
+#endif
+#if CONFIG_WMV1_BM_DECODER
+        case AV_CODEC_ID_WMV1:      return "wmv1_bm";
+#endif
+#if CONFIG_WMV2_BM_DECODER
+        case AV_CODEC_ID_WMV2:      return "wmv2_bm";
+#endif
+#if CONFIG_WMV3_BM_DECODER
+        case AV_CODEC_ID_WMV3:      return "wmv3_bm";
+#endif
+        default:                    return NULL;
+    }
+
+    return NULL;
+}
+
+
 int avcodec_parameters_to_context(AVCodecContext *codec,
                                   const AVCodecParameters *par)
 {
@@ -196,7 +262,10 @@ int avcodec_parameters_to_context(AVCodecContext *codec,
 
     switch (par->codec_type) {
     case AVMEDIA_TYPE_VIDEO:
-        codec->pix_fmt                = par->format;
+        if(bm_find_decoder_name(par->codec_id) && par->format == AV_PIX_FMT_YUV420P)
+            codec->pix_fmt = AV_PIX_FMT_NV12;
+        else
+            codec->pix_fmt                = par->format;
         codec->width                  = par->width;
         codec->height                 = par->height;
         codec->field_order            = par->field_order;

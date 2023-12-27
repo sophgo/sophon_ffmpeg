@@ -2113,6 +2113,10 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         .name = "qsv",
         .flags = AV_PIX_FMT_FLAG_HWACCEL,
     },
+    [AV_PIX_FMT_BMCODEC] = {
+        .name = "bmcodec",
+        .flags = AV_PIX_FMT_FLAG_HWACCEL,
+    },
     [AV_PIX_FMT_MEDIACODEC] = {
         .name = "mediacodec",
         .flags = AV_PIX_FMT_FLAG_HWACCEL,

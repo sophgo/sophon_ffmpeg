@@ -1637,6 +1637,7 @@ int ff_rtsp_make_setup_request(AVFormatContext *s, const char *host, int port,
         case RTSP_LOWER_TRANSPORT_TCP:
             rtsp_st->interleaved_min = reply->transports[0].interleaved_min;
             rtsp_st->interleaved_max = reply->transports[0].interleaved_max;
+            printf("interleave TCP based rtp used: %d, %d\n", rtsp_st->interleaved_min, rtsp_st->interleaved_max);
             break;
 
         case RTSP_LOWER_TRANSPORT_UDP: {
@@ -1890,14 +1891,17 @@ redirect:
     } else {
         int ret;
         /* open the tcp connection */
+        AVDictionary *opts = map_to_opts(rt);
         ff_url_join(tcpname, sizeof(tcpname), lower_rtsp_proto, NULL,
                     host, port,
                     "?timeout=%"PRId64, rt->stimeout);
         if ((ret = ffurl_open_whitelist(&rt->rtsp_hd, tcpname, AVIO_FLAG_READ_WRITE,
-                       &s->interrupt_callback, NULL, s->protocol_whitelist, s->protocol_blacklist, NULL)) < 0) {
+                       &s->interrupt_callback, &opts, s->protocol_whitelist, s->protocol_blacklist, NULL)) < 0) {
+            av_dict_free(&opts);
             err = ret;
             goto fail;
         }
+        av_dict_free(&opts);
         rt->rtsp_hd_out = rt->rtsp_hd;
     }
     rt->seq = 0;

@@ -1,0 +1,7 @@
+test_ff_video_scale input_1080p.264 output_cif.264
+
+test_ff_video_scale 0 input_1080p.264 264 output_cif0.264
+test_ff_video_scale 1 input_1080p.264 264 output_cif1.264
+test_ff_video_scale 2 input_1080p.264 264 output_cif2.264
+test_ff_video_scale 3 input_1080p.264 264 output_cif3.264
+

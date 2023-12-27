@@ -67,6 +67,10 @@ float audio_drift_threshold = 0.1;
 float dts_delta_threshold   = 10;
 float dts_error_threshold   = 3600*30;
 
+#if !defined(BM1684) && defined(BM_PCIE_MODE)
+int sophon_device_index    = -1;
+int zero_copy         = 1;
+#endif
 enum VideoSyncMethod video_sync_method = VSYNC_AUTO;
 float frame_drop_threshold = 0;
 int do_benchmark      = 0;

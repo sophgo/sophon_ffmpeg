@@ -295,6 +295,8 @@ static void flv_set_audio_codec(AVFormatContext *s, AVStream *astream,
         apar->sample_rate = 8000;
         apar->codec_id    = AV_CODEC_ID_PCM_ALAW;
         break;
+    case FLV_CODECID_H265:
+        apar->codec_id == AV_CODEC_ID_H265;
     default:
         avpriv_request_sample(s, "Audio codec (%x)",
                flv_codecid >> FLV_AUDIO_CODECID_OFFSET);
@@ -322,6 +324,8 @@ static int flv_same_video_codec(AVCodecParameters *vpar, int flags)
         return vpar->codec_id == AV_CODEC_ID_VP6A;
     case FLV_CODECID_H264:
         return vpar->codec_id == AV_CODEC_ID_H264;
+    case FLV_CODECID_H265:
+        return vpar->codec_id == AV_CODEC_ID_H265;
     default:
         return vpar->codec_tag == flv_codecid;
     }
@@ -365,6 +369,11 @@ static int flv_set_video_codec(AVFormatContext *s, AVStream *vstream,
         break;
     case FLV_CODECID_H264:
         par->codec_id = AV_CODEC_ID_H264;
+        vstreami->need_parsing = AVSTREAM_PARSE_HEADERS;
+        ret = 3;     // not 4, reading packet type will consume one byte
+        break;
+    case FLV_CODECID_H265:
+        par->codec_id = AV_CODEC_ID_H265;
         vstreami->need_parsing = AVSTREAM_PARSE_HEADERS;
         ret = 3;     // not 4, reading packet type will consume one byte
         break;
@@ -1242,6 +1251,7 @@ retry_duration:
 
     if (st->codecpar->codec_id == AV_CODEC_ID_AAC ||
         st->codecpar->codec_id == AV_CODEC_ID_H264 ||
+        st->codecpar->codec_id == AV_CODEC_ID_H265 ||
         st->codecpar->codec_id == AV_CODEC_ID_MPEG4) {
         int type = avio_r8(s->pb);
         size--;
@@ -1251,7 +1261,8 @@ retry_duration:
             goto leave;
         }
 
-        if (st->codecpar->codec_id == AV_CODEC_ID_H264 || st->codecpar->codec_id == AV_CODEC_ID_MPEG4) {
+        if (st->codecpar->codec_id == AV_CODEC_ID_H264 || st->codecpar->codec_id == AV_CODEC_ID_H265 || 
+                st->codecpar->codec_id == AV_CODEC_ID_MPEG4) {
             // sign extension
             int32_t cts = (avio_rb24(s->pb) + 0xff800000) ^ 0xff800000;
             pts = av_sat_add64(dts, cts);
@@ -1267,7 +1278,7 @@ retry_duration:
             }
         }
         if (type == 0 && (!st->codecpar->extradata || st->codecpar->codec_id == AV_CODEC_ID_AAC ||
-            st->codecpar->codec_id == AV_CODEC_ID_H264)) {
+            st->codecpar->codec_id == AV_CODEC_ID_H264 || st->codecpar->codec_id == AV_CODEC_ID_H265)) {
             AVDictionaryEntry *t;
 
             if (st->codecpar->extradata) {

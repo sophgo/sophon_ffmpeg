@@ -40,6 +40,7 @@ HEADERS = adler32.h                                                     \
           hmac.h                                                        \
           hwcontext.h                                                   \
           hwcontext_cuda.h                                              \
+          hwcontext_bmcodec.h                                           \
           hwcontext_d3d11va.h                                           \
           hwcontext_drm.h                                               \
           hwcontext_dxva2.h                                             \
@@ -183,7 +184,7 @@ OBJS = adler32.o                                                        \
        video_enc_params.o                                               \
        film_grain_params.o                                              \
 
-
+OBJS-$(CONFIG_BMCODEC)                  += hwcontext_bmcodec.o
 OBJS-$(CONFIG_CUDA)                     += hwcontext_cuda.o
 OBJS-$(CONFIG_D3D11VA)                  += hwcontext_d3d11va.o
 OBJS-$(CONFIG_DXVA2)                    += hwcontext_dxva2.o
@@ -205,6 +206,7 @@ OBJS += $(COMPAT_OBJS:%=../compat/%)
 SHLIBOBJS-$(HAVE_GNU_WINDRES)           += avutilres.o
 
 SKIPHEADERS                            += objc.h
+SKIPHEADERS-$(CONFIG_BMCODEC)          += hwcontext_bmcodec.h
 SKIPHEADERS-$(HAVE_CUDA_H)             += hwcontext_cuda.h
 SKIPHEADERS-$(CONFIG_CUDA)             += hwcontext_cuda_internal.h     \
                                           cuda_check.h

@@ -81,5 +81,6 @@ extern const AVHWAccel ff_wmv3_dxva2_hwaccel;
 extern const AVHWAccel ff_wmv3_nvdec_hwaccel;
 extern const AVHWAccel ff_wmv3_vaapi_hwaccel;
 extern const AVHWAccel ff_wmv3_vdpau_hwaccel;
+extern const AVHWAccel ff_bmcodec_hwaccel;
 
 #endif /* AVCODEC_HWACCELS_H */

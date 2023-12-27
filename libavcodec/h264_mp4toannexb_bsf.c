@@ -159,7 +159,18 @@ static int h264_mp4toannexb_init(AVBSFContext *ctx)
         s->idr_pps_seen     = 0;
         s->extradata_parsed = 1;
     } else {
+        unsigned int extradata = 0;
         av_log(ctx, AV_LOG_ERROR, "Invalid extradata size: %d\n", extra_size);
+        if(extra_size >= 4) {
+            extradata = AV_RB32(ctx->par_in->extradata);
+            if(extradata == 0) {
+                return 0;
+            }
+        }
+        else if(extra_size >= 3) {
+            extradata = AV_RB24(ctx->par_in->extradata);
+        }
+        av_log(ctx, AV_LOG_ERROR, "Invalid extradata value: 0x%8x\n", extradata);
         return AVERROR_INVALIDDATA;
     }
 
@@ -206,6 +217,12 @@ static int h264_mp4toannexb_filter(AVBSFContext *ctx, AVPacket *opkt)
             /* possible overread ok due to padding */
             for (int i = 0; i < s->length_size; i++)
                 nal_size = (nal_size << 8) | buf[i];
+            //syj--
+            if(nal_size == 1) {
+                av_packet_move_ref(out, in);
+                av_packet_free(&in);
+                return 0;
+            }
 
             buf += s->length_size;
 

@@ -127,6 +127,18 @@ typedef struct MpegDemuxContext {
     int raw_ac3;
 } MpegDemuxContext;
 
+typedef struct MpegPsDemuxContext {
+    AVClass *class;
+    AVPacket *pkt;
+
+    uint8_t *buf;        //unparse data
+    int32_t buf_len;     //unparse data len
+    int32_t buf_maxlen;  //unparse data max len
+
+    int32_t header_state;
+    unsigned char psm_es_type[256];
+} MpegPsDemuxContext;
+
 static int mpegps_read_header(AVFormatContext *s)
 {
     MpegDemuxContext *m = s->priv_data;
@@ -223,6 +235,42 @@ static long mpegps_psm_parse(MpegDemuxContext *m, AVIOContext *pb)
         es_map_length -= 4 + es_info_length;
     }
     avio_rb32(pb); /* crc32 */
+    return 2 + psm_length;
+}
+
+static long mpegps_psm_parse_stream(MpegPsDemuxContext *m, uint8_t *buf, int32_t buf_len)
+{
+    int psm_length, ps_info_length, es_map_length;
+    uint8_t *buftemp;
+
+    if(buf_len < 6) {
+        return -1;
+    }
+
+    psm_length = (buf[0]<<8) | buf[1];//16 byte
+    ps_info_length = (buf[4]<<8) | buf[5];
+
+    /* skip program_stream_info */
+    /*es_map_length = */
+    /* Ignore es_map_length, trust psm_length */
+    es_map_length = psm_length - ps_info_length - 10;
+
+    buftemp = buf+6+ps_info_length+2;
+    /* at least one es available? */
+    while (es_map_length >= 4) {
+        unsigned char type      = buftemp[0];
+        unsigned char es_id     = buftemp[1];
+        uint16_t es_info_length = buftemp[2]<<8 | buftemp[3];
+
+        /* remember mapping from stream id to stream type */
+        m->psm_es_type[es_id] = type;
+        //printf("psm_es_type  type=%d,es_id=%02X\n",type,es_id);
+        /* skip program_stream_info */
+        //avio_skip(pb, es_info_length);
+        buftemp += 4+es_info_length;
+        es_map_length -= 4 + es_info_length;
+    }
+    //avio_rb32(pb); /* crc32 */
     return 2 + psm_length;
 }
 
@@ -496,7 +544,9 @@ redo:
 
     if (startcode >= 0x80 && startcode <= 0xcf) {
         if (len < 4)
+        {
             goto skip;
+        }
 
         if (!m->raw_ac3) {
             /* audio: skip header */
@@ -617,7 +667,9 @@ skip:
     /* no stream found: add a new stream */
     st = avformat_new_stream(s, NULL);
     if (!st)
+    {
         goto skip;
+    }
     sti = ffstream(st);
     st->id                = startcode;
     st->codecpar->codec_type = type;
@@ -632,11 +684,15 @@ skip:
 
 found:
     if (st->discard >= AVDISCARD_ALL)
+    {
         goto skip;
+    }
     if (startcode >= 0xa0 && startcode <= 0xaf) {
       if (st->codecpar->codec_id == AV_CODEC_ID_MLP) {
             if (len < 6)
+            {
                 goto skip;
+            }
             avio_skip(s->pb, 6);
             len -=6;
       }
@@ -1057,3 +1113,322 @@ const AVInputFormat ff_vobsub_demuxer = {
     .priv_class     = &vobsub_demuxer_class,
 };
 #endif
+/**************************************************************/
+/*real-time video stream ps parse*/
+/**************************************************************/
+
+static int find_next_start_code2(uint8_t **buf, int *size_ptr,
+                                int32_t *header_state)
+{
+    unsigned int state, v;
+    int val, n;
+
+    state = *header_state;
+    n     = *size_ptr;
+    while (n > 0) {
+        v = (*buf)[0];
+        (*buf)++;
+        n--;
+        if (state == 0x000001) {
+            state = ((state << 8) | v) & 0xffffff;
+            val   = state;
+            goto found;
+        }
+        state = ((state << 8) | v) & 0xffffff;
+    }
+    val = -1;
+
+found:
+    *header_state = state;
+    *size_ptr     = n;
+    return val;
+}
+#define MAX_PS_BUF_CACHE 16*1024*1024
+static int input_buf(MpegPsDemuxContext *ps,
+                               const uint8_t *psbuf, int psbuflen) {
+
+    if(ps->buf_len + psbuflen > ps->buf_maxlen) {
+        uint8_t *buf_temp = ps->buf;
+        int32_t len_temp = ps->buf_len;
+
+        if(ps->buf_len < MAX_PS_BUF_CACHE) {
+            ps->buf = av_mallocz((ps->buf_len + psbuflen) * 2);
+            ps->buf_maxlen = (ps->buf_len + psbuflen) * 2;
+
+            if(buf_temp != NULL) {
+                memcpy(ps->buf,buf_temp,len_temp);
+                av_free(buf_temp);
+                buf_temp = NULL;
+            }
+        }else{
+            //drop
+            av_log(NULL, AV_LOG_WARNING, "The buffer is too large, drop some data.\n");
+            memmove(ps->buf, ps->buf+psbuflen, ps->buf_len - psbuflen);
+            ps->buf_len = ps->buf_len - psbuflen;
+        }
+    }
+
+    memcpy(ps->buf+ps->buf_len, psbuf, psbuflen);
+    ps->buf_len += psbuflen;
+
+    return ps->buf_len;
+}
+
+
+static int ps_packet_alloc(AVBufferRef **buf, int size)                                                   
+{                                                                                                      
+    int ret;                                                                                           
+    if (size < 0 || size >= INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE)                                    
+        return AVERROR(EINVAL);                                                                        
+                                                                                                       
+    ret = av_buffer_realloc(buf, size + AV_INPUT_BUFFER_PADDING_SIZE);                                 
+    if (ret < 0)                                                                                       
+        return ret;                                                                                    
+                                                                                                       
+    memset((*buf)->data + size, 0, AV_INPUT_BUFFER_PADDING_SIZE);                                      
+                                                                                                       
+    return 0;                                                                                          
+}                                                                                                      
+
+
+static int av_ps_get_new_packet(MpegPsDemuxContext *ps, AVPacket *pkt, int size) {
+    AVBufferRef *buf = NULL;
+    int ret = ps_packet_alloc(&buf, size);    
+    if (ret < 0)
+        return ret;
+
+    av_init_packet(pkt);      
+    pkt->buf      = buf;
+    pkt->data     = buf->data;
+    pkt->size     = size;
+
+    return 0;
+}
+/*
+1, when have complete avpkt return > 0
+*/
+static int mpegps_read_pes_header2(MpegPsDemuxContext *ps,
+                                  uint8_t **ps_payload,
+                                  uint8_t **psbuf_errpkt,
+                                  int  *ps_fullpkt,
+                                  int64_t *ppos, int *pstart_code,
+                                  int64_t *ppts, int64_t *pdts)
+{
+    uint8_t *buf  = ps->buf;           //last unresolved data
+    int32_t buf_len = ps->buf_len;     //last unresolved data len
+    int startcode, startcode_pkt;
+    uint8_t *pesbuf = NULL;
+    int32_t  pesbuf_remainlen = 0;
+    int32_t  havepsheader = 0;
+    int pesheaderlen = 0;
+redo:
+    ps->header_state = 0xff;
+    startcode = find_next_start_code2(&buf, &buf_len, &ps->header_state);
+    if (startcode < 0) {
+        return -1;
+    }
+
+    if ((startcode == PACK_START_CODE)
+      ||(startcode == SYSTEM_HEADER_START_CODE) 
+      ||(startcode == PADDING_STREAM)){
+        if(havepsheader) {
+            goto have_pkt;
+        }
+        goto redo;
+    }
+
+    if(startcode == PRIVATE_STREAM_1){
+        int pstreamlen;
+        if(havepsheader) {
+            goto have_pkt;
+        }
+
+        pstreamlen = (0xFF&buf[0]) << 8 | (0xFF&buf[1]);
+        if(buf_len > (pstreamlen+2)) {
+            buf     += (pstreamlen+2);
+            buf_len -= (pstreamlen+2);
+            goto redo;
+        }else {
+            return -1;
+        }
+    }
+
+    if(startcode == PROGRAM_STREAM_MAP) {
+        mpegps_psm_parse_stream(ps,buf,buf_len);
+        if(havepsheader) {
+            goto have_pkt;
+        }
+        goto redo;
+    }
+
+    if (startcode >= 0x1c0 && startcode <= 0x1df) {
+        if(havepsheader) {
+            goto have_pkt;
+        }
+        goto redo;
+    }
+
+
+    if (startcode != 0x01e0) {
+        goto redo;
+    } else { //(startcode == 0x01e0)
+        if(havepsheader) 
+            goto have_pkt;
+
+        //drop 0000 01e0
+        if((buf[0] == 0) && (buf[1] == 0) && (buf[2] == 0x01) && (buf[3] == 0xe0)){
+            buf      += 4;
+            buf_len  -= 4;
+        }
+
+        havepsheader = 1;
+        startcode_pkt = startcode;
+
+        pesbuf = &buf[0]; 
+        pesbuf_remainlen = buf_len; 
+        pesbuf += 2;
+        pesbuf_remainlen -= 2;
+        if(pesbuf_remainlen <= 3) {
+            return -1;
+        }
+        pesbuf           += 2;
+        pesbuf_remainlen -= 2;
+        pesheaderlen      = (0xFF&pesbuf[0]);
+        pesbuf           += (1+pesheaderlen);
+        pesbuf_remainlen -= (1+pesheaderlen);
+
+#if 0
+        int32_t  peslen = 0;
+        peslen = (0xFF&pesbuf[0]) << 8 | (0xFF&pesbuf[1]);
+        if(peslen == 0) {
+            goto redo;
+        }   
+        if(buf_len == peslen ) {
+            buf += (peslen);
+            buf_len -= (peslen);
+        }
+
+        if(buf_len > peslen ) {
+            buf += (peslen);
+            buf_len -= (peslen);
+        }
+#endif
+
+        goto redo;
+    }
+
+have_pkt:
+    *pstart_code = startcode_pkt;
+    *ps_payload  = pesbuf;
+    int payload_len =  (buf - pesbuf - 4);
+    if (payload_len < 0){
+        *psbuf_errpkt = buf - 4;
+        return -2;
+    }
+    return payload_len;
+}
+
+
+/**************************************************************/
+/* parsing functions - called from other demuxers such as RTP */
+
+MpegPsDemuxContext *avpriv_mpegps_parse_open(AVFormatContext *s) {
+    MpegPsDemuxContext *ps;
+    ps = av_mallocz(sizeof(MpegPsDemuxContext));
+    if (!ps)
+        return NULL;
+
+    return ps;
+}
+
+//释放一些资源，比如MpegDemuxContext
+void avpriv_mpegps_parse_close(MpegPsDemuxContext *ps)
+{
+    if(ps->buf){
+        av_free(ps->buf);
+    }
+    av_free(ps);
+}
+
+
+int avpriv_mpegps_parse_packet(AVFormatContext *s,MpegPsDemuxContext *ps, AVPacket *pkt,
+                               const uint8_t *psbuf, int psbuflen)
+{
+    int len, startcode, ret;
+    uint8_t *ps_payload;
+    int64_t pts, dts, dummy_pos; // dummy_pos is needed for the index building to work
+    int drop_len = 0;
+    int  ps_fullpkt;
+    int  es_type;
+    enum AVCodecID codec_id = AV_CODEC_ID_NONE;
+    enum AVMediaType type;
+
+    if(psbuf != NULL) {
+#if 0
+        static FILE *fpps =  NULL;
+        if(fpps == NULL) {
+            fpps = fopen("recv.ps","wb+");
+        }
+        fwrite(psbuf, psbuflen, 1, fpps);
+#endif
+        input_buf(ps, psbuf, psbuflen);
+    }
+
+    uint8_t *psbuf_errpkt = NULL;
+    len = mpegps_read_pes_header2(ps, &ps_payload, &psbuf_errpkt, &ps_fullpkt,
+                                      &dummy_pos, &startcode, &pts, &dts);
+    if (len == -1) {
+        return len;
+    }
+    else if (len == -2){
+        //drop err pkt
+        int drop_len = psbuf_errpkt - ps->buf;
+        if(ps->buf_len > drop_len) {
+            memmove(ps->buf, psbuf_errpkt, ps->buf_len - drop_len);
+            ps->buf_len = ps->buf_len - drop_len;
+        }else{
+            //clean buf
+            memset(ps->buf, 0, ps->buf_maxlen);
+            ps->buf_len = 0;
+        }
+        return -1;
+    }
+    else if (len == 0) {
+        //drop dirty data
+        int drop_len = ps_payload - ps->buf;
+        if(ps->buf_len > (len + drop_len)) {
+            memmove(ps->buf, ps_payload+len, ps->buf_len - (drop_len+len));
+            ps->buf_len = ps->buf_len - (drop_len + len);
+        }
+        return -1;
+    }
+
+    es_type = ps->psm_es_type[startcode & 0xff];
+    if (es_type == STREAM_TYPE_VIDEO_H264) {
+        codec_id = AV_CODEC_ID_H264;
+        type     = AVMEDIA_TYPE_VIDEO;
+    } else if (es_type == STREAM_TYPE_VIDEO_HEVC) {
+        codec_id = AV_CODEC_ID_HEVC;
+        type     = AVMEDIA_TYPE_VIDEO;
+    }
+
+    s->streams[0]->codecpar->codec_id = codec_id;
+    s->streams[0]->codecpar->codec_type = type;
+
+    //copy to avpkt
+    ret = av_ps_get_new_packet(ps, pkt, len);
+    pkt->pos          = dummy_pos;
+    memcpy(pkt->data,ps_payload,len);
+
+    drop_len = ps_payload - ps->buf;
+    if(ps->buf_len > (len + drop_len)) {
+        memmove(ps->buf, ps_payload+len, ps->buf_len - (drop_len+len));
+        ps->buf_len = ps->buf_len - (drop_len + len);
+    }
+    else {
+        ps->buf_len = 0;
+    }
+
+    return (ret < 0) ? ret : 0;
+}
+

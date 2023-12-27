@@ -71,6 +71,7 @@ typedef struct NoiseContext {
 
     double var_values[VAR_VARS_NB];
 
+    int seed;
     unsigned int state;
     unsigned int pkt_idx;
 } NoiseContext;
@@ -86,6 +87,10 @@ static int noise_init(AVBSFContext *ctx)
             return AVERROR(ENOMEM);
     }
 
+    if(s->seed != 0){
+        s->state += s->seed;
+        s->seed = 0;
+    }
     ret = av_expr_parse(&s->amount_pexpr, s->amount_str,
                         var_names, NULL, NULL, NULL, NULL, 0, ctx);
     if (ret < 0) {
@@ -186,7 +191,9 @@ static int noise(AVBSFContext *ctx, AVPacket *pkt)
     for (i = 0; i < pkt->size; i++) {
         s->state += pkt->data[i] + 1;
         if (amount && s->state % amount == 0)
+        {
             pkt->data[i] = s->state;
+        }
     }
 
     s->var_values[VAR_STATE] = s->state;
@@ -209,6 +216,7 @@ static const AVOption options[] = {
     { "amount",     NULL, OFFSET(amount_str),     AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, FLAGS },
     { "drop",       NULL, OFFSET(drop_str),       AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, FLAGS },
     { "dropamount", NULL, OFFSET(dropamount),     AV_OPT_TYPE_INT,    { .i64 = 0    }, 0, INT_MAX, FLAGS },
+    { "seed", NULL, OFFSET(seed), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, FLAGS },
     { NULL },
 };
 

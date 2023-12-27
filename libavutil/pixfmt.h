@@ -419,7 +419,11 @@ enum AVPixelFormat {
 
     AV_PIX_FMT_RGBAF32BE,   ///< IEEE-754 single precision packed RGBA 32:32:32:32, 128bpp, RGBARGBA..., big-endian
     AV_PIX_FMT_RGBAF32LE,   ///< IEEE-754 single precision packed RGBA 32:32:32:32, 128bpp, RGBARGBA..., little-endian
-
+	AV_PIX_FMT_BMCODEC,
+    AV_PIX_FMT_RGBP,       ///< planar RGB 4:4:4 24bpp
+    AV_PIX_FMT_RGB24P = AV_PIX_FMT_RGBP, // alias for #AV_PIX_FMT_RGBP
+    AV_PIX_FMT_BGRP,       ///< planar BGR 4:4:4 24bpp
+    AV_PIX_FMT_BGR24P = AV_PIX_FMT_BGRP, // alias for #AV_PIX_FMT_BGRP
     AV_PIX_FMT_NB         ///< number of pixel formats, DO NOT USE THIS if you want to link with shared libav* because the number of formats might differ between versions
 };
 

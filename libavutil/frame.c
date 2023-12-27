@@ -823,6 +823,7 @@ const char *av_frame_side_data_name(enum AVFrameSideDataType type)
     case AV_FRAME_DATA_DOVI_RPU_BUFFER:             return "Dolby Vision RPU Data";
     case AV_FRAME_DATA_DOVI_METADATA:               return "Dolby Vision Metadata";
     case AV_FRAME_DATA_AMBIENT_VIEWING_ENVIRONMENT: return "Ambient viewing environment";
+    case AV_FRAME_DATA_BM_ROI_INFO:                 return "ROI info";
     }
     return NULL;
 }

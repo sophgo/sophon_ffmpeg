@@ -214,6 +214,7 @@ enum AVFrameSideDataType {
      * Ambient viewing environment metadata, as defined by H.274.
      */
     AV_FRAME_DATA_AMBIENT_VIEWING_ENVIRONMENT,
+	AV_FRAME_DATA_BM_ROI_INFO,
 };
 
 enum AVActiveFormatDescription {
@@ -296,6 +297,42 @@ typedef struct AVRegionOfInterest {
      */
     AVRational qoffset;
 } AVRegionOfInterest;
+
+typedef union {
+    struct {
+        int mb_force_mode;
+        int mb_qp;
+    }H264;
+
+    struct {
+        int ctu_force_mode;
+        int ctu_coeff_drop;
+
+        int sub_ctu_qp_0;
+        int sub_ctu_qp_1;
+        int sub_ctu_qp_2;
+        int sub_ctu_qp_3;
+
+        int lambda_sad_0;
+        int lambda_sad_1;
+        int lambda_sad_2;
+        int lambda_sad_3;
+    }HEVC;
+} RoiField;
+
+typedef struct AVBMRoiInfo {
+    // int numbers;
+    /* Enable ROI map. */
+    int customRoiMapEnable;
+    /* Enable custom lambda map. */
+    int customLambdaMapEnable;
+    /* Force CTU to be encoded with intra or to be skipped.  */
+    int customModeMapEnable;
+    /* Force all coefficients to be zero after TQ or not for each CTU (to be dropped).*/
+    int customCoefDropEnable;
+
+    RoiField field[0x40000];
+} AVBMRoiInfo;
 
 /**
  * This structure describes decoded (raw) audio or video data.

@@ -155,6 +155,7 @@ struct RTPDemuxContext {
     uint32_t base_timestamp;
     int64_t  unwrapped_timestamp;
     int64_t  range_start_offset;
+    int reuse_source_timestamp;
     int max_payload_size;
     /* used to send back RTCP RR */
     char hostname[256];
