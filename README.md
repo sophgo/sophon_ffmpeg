@@ -100,7 +100,7 @@ make install
 
 This project is licensed under the LGPL License, Version 3. Please refere to the LICNESE file for detailed information. 
 
-## Authorts
+## Authors
 
 Sophgo multimedia team
 
