@@ -1936,6 +1936,7 @@ ARCH_LIST="
     x86_64
     sw_64
     loongarch64
+    riscv64
 "
 
 ARCH_EXT_LIST_ARM="
@@ -4712,6 +4713,9 @@ case "$arch" in
     loongarch64|loongarch64)
         arch="loongarch64"
     ;;
+    riscv64|riscv64)
+	arch="riscv64"
+    ;;
     sw64|sw_64)
         arch="sw_64"
     ;;
@@ -6074,7 +6078,8 @@ for func in $COMPLEX_FUNCS; do
 done
 
 # these are off by default, so fail if requested and not available
-enabled bmcodec           && require_headers bmvppapi.h # TODO
+enabled bmcodec
+# && require_headers bmvppapi.h # TODO
 enabled cuda_sdk          && require cuda_sdk cuda.h cuCtxCreate -lcuda
 enabled chromaprint       && require chromaprint chromaprint.h chromaprint_get_version -lchromaprint
 enabled decklink          && { require_headers DeckLinkAPI.h &&
