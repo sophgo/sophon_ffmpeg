@@ -40,11 +40,11 @@ With officical FFMpeg, following changes are done in this project.
         --extra-ldflags="-L./extern_lib/bm_hardware_accele/decode_x86_64/lib -L./extern_lib/3rdparty/libbmcv/lib/pcie -Wl,-rpath=./extern_lib/3rdparty/libbmcv/lib/pcie -L./extern_lib/prebuilt/x86_64/lib -Wl,-rpath=./extern_lib/prebuilt/x86_64/lib" \
         --extra-libs="-lm -lbmion -lbmvpulite -lbmvpuapi -lbmvppapi -lbmlib -lbmcv -lbmjpulite -lbmjpuapi -lbmvideo -lrt -lssl -lcrypto -ldl -lresolv -lstdc++ -lgb28181_sip" \
         --extra-cflags="-DBM1684 -I./extern_lib/3rdparty/libbmcv/include -DBM_PCIE_MODE=1 -I./extern_lib/bm_hardware_accele/decode_x86_64/include/ -I./extern_lib/prebuilt/include/freetype2 -I./extern_lib/prebuilt/include/ -I./extern_lib/prebuilt/include/gbclient"
-	4. make and install to DESTDIR
+    3. make and install to DESTDIR
 
 ### x86_64 linux with x86_64-linux-gcc 5.4.0
     1. download toolchain 
-	wget https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64-core-i7/tarballs/x86-64-core-i7--glibc--stable-2017.05-toolchains-1-1.tar.bz2
+        wget https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64-core-i7/tarballs/x86-64-core-i7--glibc--stable-2017.05-toolchains-1-1.tar.bz2
     2. export PKG_CONFIG_PATH=./extern_lib/prebuilt/x86_64/lib/pkgconfig:$PKG_CONFIG_PATH
     3. configure
     ./configure --cross-prefix=x86_64-linux- --enable-cross-compile --target-os=linux --arch=x86_64 \
@@ -65,11 +65,11 @@ With officical FFMpeg, following changes are done in this project.
         --extra-ldflags="-L./extern_lib/bm_hardware_accele/decode_x86_64/lib -L./extern_lib/3rdparty/libbmcv/lib/pcie -Wl,-rpath=./extern_lib/3rdparty/libbmcv/lib/pcie -L./extern_lib/prebuilt/x86_64/lib -Wl,-rpath=./extern_lib/prebuilt/x86_64/lib" \
         --extra-libs="-lm -lbmion -lbmvpulite -lbmvpuapi -lbmvppapi -lbmlib -lbmcv -lbmjpulite -lbmjpuapi -lbmvideo -lrt -lssl -lcrypto -ldl -lresolv -lstdc++ -lgb28181_sip" \
         --extra-cflags="-DBM1684 -I./extern_lib/3rdparty/libbmcv/include -DBM_PCIE_MODE=1 -I./extern_lib/bm_hardware_accele/decode_x86_64/include/ -I./extern_lib/prebuilt/include/freetype2 -I./extern_lib/prebuilt/include/ -I./extern_lib/prebuilt/include/gbclient"
-	4. make and install to DESTDIR
+    4. make and install to DESTDIR
 	
 ### SOPHGO soc with aarch64-linux-gnu-gcc
     1. download toolchain from linaro gnu toolchain
-       wget https://releases.linaro.org/components/toolchain/gcc-linaro/6.3-2017.05/gcc-linaro-6.3-2017.05.tar.xz
+        wget https://releases.linaro.org/components/toolchain/gcc-linaro/6.3-2017.05/gcc-linaro-6.3-2017.05.tar.xz
     2. export PKG_CONFIG_PATH=./extern_lib/prebuilt/lib/pkgconfig:$PKG_CONFIG_PATH
     3. configure
 	./configure --enable-cross-compile --cross-prefix=aarch64-linux-gnu- --target-os=linux --arch=aarch64 \
@@ -90,9 +90,9 @@ With officical FFMpeg, following changes are done in this project.
         --disable-hwaccel=vp8_vaapi --disable-hwaccel=wmv3_vaapi \
         --extra-ldflags="-L./extern_lib/bm_hardware_accele/decode_arm64/lib -L./extern_lib/prebuilt/lib -Wl,-rpath=./extern_lib/bm_hardware_accele/decode_arm64/lib:./extern_lib/prebuilt/lib"\
         --extra-libs="-lm -lbmion -lbmvpulite -lbmvpuapi -lbmvppapi -lbmjpulite -lbmcv -lbmlib -lbmjpuapi -lbmvideo -lrt -lssl -lcrypto -ldl -lresolv -lstdc++ -lgb28181_sip" \
-        --extra-cflags="-DBM1684 -I./extern_lib/3rdparty/libbmcv/include -DBM_PCIE_MODE=0 -I./extern_lib/bm_hardware_accele/decode_arm64/include/ -I./extern_lib/prebuilt/include/freetype2 -I./extern_lib/prebuilt/include/ -I./extern_lib/prebuilt/include/gbclient"
-	4. make and install to DESTDIR
-		
+        --extra-cflags="-DBM1684 -I./extern_lib/3rdparty/libbmcv/include -I./extern_lib/bm_hardware_accele/decode_arm64/include/ -I./extern_lib/prebuilt/include/freetype2 -I./extern_lib/prebuilt/include/ -I./extern_lib/prebuilt/include/gbclient"
+    4. make and install to DESTDIR
+	
 ## License
 
 This project is licensed under the LGPL License, Version 3. Please refere to the LICNESE file for detailed information. 
