@@ -99,7 +99,7 @@ typedef signed long long int s64;
 #define BMCV_LOG_TAG "BMCV"
 #define MAX_BMCV_LOG_BUFFER_SIZE (256)
 #define MAX_bm_image_CHANNEL 4
-#define BM1686 0x1686a200
+#define BM1688 0x1686a200
 #define COLOR_SPACE_YUV             0
 #define COLOR_SPACE_RGB             1
 #define COLOR_SPACE_HSV             2
@@ -129,8 +129,28 @@ typedef struct {
     float val;
 } __attribute__((packed)) sort_t;
 
+typedef struct {
+    int width;
+    int height;
+    bm_image_format_ext format;
+    void** data;
+    int* step;
+} bmMat;
+
 typedef struct bm_mem_desc bm_device_mem_t;
 typedef struct bm_mem_desc bm_system_mem_t;
+
+int find_tpufirmaware_path(char fw_path[512], const char* path);
+bm_status_t bm_load_tpu_module(bm_handle_t handle, tpu_kernel_module_t *tpu_module, int core_id);
+bm_status_t bm_tpu_kernel_launch(bm_handle_t handle,
+                         const char *func_name,
+                         void       *param,
+                         size_t      size,
+                         int         core_id);
+
+void put_text(bmMat mat, const char* text, bmcv_point_t org, int fontFace, float fontScale,
+            bmcv_color_t color, int thickness);
+void draw_line(bmMat* inout, bmcv_point_t start, bmcv_point_t end, bmcv_color_t color, int thickness);
 
 // typedef enum {
 //   BM_SUCCESS = 0,
@@ -146,16 +166,16 @@ typedef struct bm_mem_desc bm_system_mem_t;
 // } bm_status_t;
 
 typedef enum {
-  STORAGE_MODE_1N_FP32    = 0,
-  STORAGE_MODE_1N_INT8    = 1,
-  STORAGE_MODE_1N_INT16   = 2,
-  STORAGE_MODE_2N_INT16   = 3,
-  STORAGE_MODE_4N_INT8    = 4,
-  STORAGE_MODE_2IC_FP32   = 5,  // special for 2IC weight
-  STORAGE_MODE_4N_4IC_4OC = 6,
-  STORAGE_MODE_4N_INT16   = 7,
-  STORAGE_MODE_UNINITILIZED,
-  STORAGE_MODE_END
+    STORAGE_MODE_1N_FP32    = 0,
+    STORAGE_MODE_1N_INT8    = 1,
+    STORAGE_MODE_1N_INT16   = 2,
+    STORAGE_MODE_2N_INT16   = 3,
+    STORAGE_MODE_4N_INT8    = 4,
+    STORAGE_MODE_2IC_FP32   = 5,  // special for 2IC weight
+    STORAGE_MODE_4N_4IC_4OC = 6,
+    STORAGE_MODE_4N_INT16   = 7,
+    STORAGE_MODE_UNINITILIZED,
+    STORAGE_MODE_END
 } TENSOR_STORAGE_MODE;
 
 typedef enum {
@@ -215,19 +235,19 @@ typedef struct bm_image_private{
 
 
 typedef struct bm_api_width_align {
-  u64 S_global_offset;
-  u64 D_global_offset;
-  int N;
-  int C;
-  int H;
-  int W;
-  int src_n_stride;
-  int src_c_stride;
-  int src_h_stride;
-  int dst_n_stride;
-  int dst_c_stride;
-  int dst_h_stride;
-  int data_size;
+    u64 S_global_offset;
+    u64 D_global_offset;
+    int N;
+    int C;
+    int H;
+    int W;
+    int src_n_stride;
+    int src_c_stride;
+    int src_h_stride;
+    int dst_n_stride;
+    int dst_c_stride;
+    int dst_h_stride;
+    int data_size;
 } bm_api_cv_width_align_t;
 
 plane_layout set_plane_layout(int n, int c, int h, int w, int Dsize);
@@ -252,10 +272,10 @@ bm_status_t  update_memory_layout(bm_handle_t     handle,
                                   plane_layout    dst_layout);
 
 DECL_EXPORT bm_status_t bm_send_api(
-  bm_handle_t  handle,
-  int api_id,
-  const u8     *api,
-  u32          size);
+    bm_handle_t  handle,
+    int api_id,
+    const u8     *api,
+    u32          size);
 
 DECL_EXPORT bm_status_t bm_sync_api(bm_handle_t handle);
 

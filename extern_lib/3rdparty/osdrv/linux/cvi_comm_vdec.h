@@ -71,6 +71,7 @@ typedef struct _VDEC_CHN_ATTR_S {
 	CVI_U32 u32FrameBufSize; /* RW; frame buffer size(Byte) */
 	CVI_U32 u32FrameBufCnt;
 	COMPRESS_MODE_E enCompressMode; /* RW; compress mode */
+	CVI_U8 u8CommandQueueDepth; /* RW; command queue depth [0,4]*/
 	union {
 		VDEC_ATTR_VIDEO_S
 		stVdecVideoAttr; /* structure with video ( h264/h265) */

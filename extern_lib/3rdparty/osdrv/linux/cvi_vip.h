@@ -77,7 +77,11 @@ struct cvi_rgn_param {
 struct cvi_rgn_odec {
 	__u8 enable;
 	__u8 attached_ow;
+	__u8 canvas_updated;
 	__u32 bso_sz;
+	__u64 canvas_mutex_lock;
+	__u64 rgn_canvas_waitq;
+	__u64 rgn_canvas_doneq;
 };
 
 struct cvi_rgn_lut_cfg {

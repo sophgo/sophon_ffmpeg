@@ -118,19 +118,21 @@ typedef struct _FISHEYE_ATTR_S {
 	CVI_BOOL bEnable;
 	CVI_BOOL bBgColor;
 	CVI_U32 u32BgColor;
-
 	CVI_S32 s32HorOffset;
 	CVI_S32 s32VerOffset;
-
 	CVI_U32 u32TrapezoidCoef;
 	CVI_S32 s32FanStrength;
-
 	FISHEYE_MOUNT_MODE_E enMountMode;
-
 	USAGE_MODE enUseMode;
 	CVI_U32 u32RegionNum;
 	FISHEYE_REGION_ATTR_S astFishEyeRegionAttr[FISHEYE_MAX_REGION_NUM];
+	GRID_INFO_ATTR_S stGridInfoAttr;
 } FISHEYE_ATTR_S;
+
+typedef struct _WARP_ATTR_S {
+	CVI_BOOL bEnable;
+	GRID_INFO_ATTR_S stGridInfoAttr;
+} WARP_ATTR_S;
 
 /*Spread correction attribute
  *

@@ -51,6 +51,7 @@ typedef struct RawVideoContext {
     int is_yuv2;
     int is_lt_16bpp; // 16bpp pixfmt and bits_per_coded_sample < 16
     int tff;
+    int sg_vi;
 
     BswapDSPContext bbdsp;
     void *bitstream_buf;
@@ -59,6 +60,7 @@ typedef struct RawVideoContext {
 
 static const AVOption options[]={
 {"top", "top field first", offsetof(RawVideoContext, tff), AV_OPT_TYPE_BOOL, {.i64 = -1}, -1, 1, AV_OPT_FLAG_DECODING_PARAM|AV_OPT_FLAG_VIDEO_PARAM},
+{"sg_vi", "using sophon input framework", offsetof(RawVideoContext, sg_vi), AV_OPT_TYPE_FLAGS, {.i64 = 0}, 0, 1, AV_OPT_FLAG_DECODING_PARAM|AV_OPT_FLAG_VIDEO_PARAM},
 {NULL}
 };
 
@@ -67,6 +69,82 @@ static const AVClass rawdec_class = {
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
+
+struct buffer_info {
+    uint64_t paddr;
+    int idx;
+};
+
+static int bm_fill_frame(AVCodecContext *avctx, AVFrame* frame, AVPacket* avpkt, uint8_t* buf)
+{
+    RawVideoContext *context = avctx->priv_data;
+    const AVPixFmtDescriptor *desc;
+
+    int i, ret = 0;
+
+    av_log(avctx, AV_LOG_TRACE, "[%s,%d] enter\n", __func__, __LINE__);
+
+
+    frame->width  = avctx->width;
+    frame->height = avctx->height;
+    frame->format = avctx->pix_fmt;
+    frame->colorspace  = avctx->colorspace;
+    frame->color_range = avctx->color_range;
+    frame->color_primaries = avctx->color_primaries;
+    frame->color_trc = avctx->color_trc;
+    frame->chroma_location = avctx->chroma_sample_location;
+
+    av_log(avctx, AV_LOG_TRACE, "pixel format: %s, color space: %s, color range: %s\n",
+           av_get_pix_fmt_name(avctx->pix_fmt),
+           av_color_space_name(avctx->colorspace),
+           av_color_range_name(avctx->color_range));
+
+
+    if (frame->width==0 || frame->height== 0 || frame->buf[0]==NULL) {
+         av_log(avctx, AV_LOG_ERROR, "please check the frame!!!\n");
+         return -1;
+    }
+
+    struct buffer_info  *video_data_info = (struct buffer_info*)avpkt->opaque;
+        /* SoC mode*/
+    int cbcr_interleave = 0;
+
+    if (avctx->pix_fmt == AV_PIX_FMT_NV21 || avctx->pix_fmt == AV_PIX_FMT_NV12) {
+        cbcr_interleave = 1;
+    } else if(avctx->pix_fmt == AV_PIX_FMT_YUV420P) {
+        cbcr_interleave = 0;
+    }
+
+    av_image_fill_linesizes(frame->linesize, avctx->pix_fmt, frame->width);
+    for (i = 0; i < 4; i++)
+        frame->linesize[i + 4] = frame->linesize[i];
+
+    frame->data[0] = buf;
+    frame->data[1] = frame->data[0] + (frame->height * frame->width);
+
+    if (cbcr_interleave == 0) {
+        frame->data[2] = frame->data[1] + (frame->linesize[0] * frame->height)/4;
+    }
+
+    frame->data[4] = video_data_info->paddr;
+    frame->data[5] = video_data_info->paddr + (frame->data[1] - frame->data[0]);
+    if (cbcr_interleave == 0)
+        frame->data[6] = frame->data[5] + (frame->data[2] - frame->data[1]);
+
+    if (!frame->buf[0]) {
+        ret = -1;
+        goto fail;
+    }
+
+    av_log(avctx, AV_LOG_TRACE, "[%s,%d] leave\n", __func__, __LINE__);
+
+    return 0;
+
+fail:
+    av_log(avctx, AV_LOG_TRACE, "[%s,%d] leave\n", __func__, __LINE__);
+
+    return ret;
+}
 
 static av_cold int raw_init_decoder(AVCodecContext *avctx)
 {
@@ -225,7 +303,6 @@ static int raw_decode(AVCodecContext *avctx, AVFrame *frame,
         return context->frame_size;
 
     need_copy = !avpkt->buf || context->is_1_2_4_8_bpp || context->is_yuv2 || context->is_lt_16bpp;
-
     frame->pict_type        = AV_PICTURE_TYPE_I;
     frame->key_frame        = 1;
 
@@ -349,11 +426,18 @@ static int raw_decode(AVCodecContext *avctx, AVFrame *frame,
         return AVERROR(EINVAL);
     }
 
-    if ((res = av_image_fill_arrays(frame->data, frame->linesize,
-                                    buf, avctx->pix_fmt,
-                                    avctx->width, avctx->height, 1)) < 0) {
-        av_buffer_unref(&frame->buf[0]);
-        return res;
+    if (context->sg_vi) {
+        if((res=bm_fill_frame(avctx, frame, avpkt, buf))<0) {
+                return res;
+            }
+    }
+    else {
+        if ((res = av_image_fill_arrays(frame->data, frame->linesize,
+                                        buf, avctx->pix_fmt,
+                                        avctx->width, avctx->height, 1)) < 0) {
+            av_buffer_unref(&frame->buf[0]);
+            return res;
+        }
     }
 
     if (avctx->pix_fmt == AV_PIX_FMT_PAL8) {

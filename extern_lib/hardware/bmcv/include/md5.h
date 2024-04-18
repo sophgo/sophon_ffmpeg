@@ -83,6 +83,6 @@ void plane_md5(MD5_CTX *md5_ctx,
 );
 
 int md5_cmp(unsigned char* got, unsigned char* exp ,int size);
-int md5_get(unsigned char* got, int size, char* md5_str);
+int md5_get(unsigned char* got, int size, char* md5_str, int flag);
 
 #endif /* _MD5_H_ */

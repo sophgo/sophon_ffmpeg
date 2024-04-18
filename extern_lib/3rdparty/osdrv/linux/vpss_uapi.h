@@ -80,7 +80,6 @@ struct vpss_chn_rot_cfg {
 struct vpss_chn_ldc_cfg {
 	VPSS_GRP VpssGrp;
 	VPSS_CHN VpssChn;
-	ROTATION_E enRotation;
 	VPSS_LDC_ATTR_S stLDCAttr;
 	CVI_U64 meshHandle;
 };
@@ -149,10 +148,21 @@ struct cvi_vpss_vc_sb_cfg {
 struct vpss_grp_csc_cfg {
 	VPSS_GRP VpssGrp;
 	CVI_S32 proc_amp[PROC_AMP_MAX];
+	__u8 enable;
 	__u16 coef[3][3];
 	__u8 sub[3];
 	__u8 add[3];
 	__u8 scene;
+	__u8 is_copy_upsample;
+};
+
+struct vpss_chn_csc_cfg {
+	VPSS_GRP VpssGrp;
+	VPSS_CHN VpssChn;
+	__u8 enable;
+	__u16 coef[3][3];
+	__u8 sub[3];
+	__u8 add[3];
 };
 
 struct vpss_int_normalize {
@@ -231,6 +241,23 @@ struct vpss_scene {
 	CVI_U8 scene;
 };
 
+typedef struct _bm_vpss_cfg {
+	struct vpss_grp_attr grp_attr;
+	struct vpss_grp_crop_cfg grp_crop_cfg;
+	struct vpss_snd_frm_cfg snd_frm_cfg;
+	struct vpss_grp_csc_cfg grp_csc_cfg;
+	struct vpss_chn_frm_cfg chn_frm_cfg;
+	struct vpss_chn_attr chn_attr;
+	struct vpss_chn_crop_cfg chn_crop_cfg;
+	struct vpss_chn_csc_cfg chn_csc_cfg;
+	struct vpss_chn_coef_level_cfg chn_coef_level_cfg;
+	struct vpss_chn_draw_rect_cfg chn_draw_rect_cfg;
+	struct vpss_chn_convert_cfg chn_convert_cfg;
+	struct _vpss_coverex_cfg coverex_cfg;
+	struct _vpss_mosaic_cfg mosaic_cfg;
+	struct cvi_rgn_cfg rgn_cfg[RGN_MAX_LAYER_VPSS];
+} bm_vpss_cfg;
+
 /* Public */
 #define CVI_VPSS_CREATE_GROUP _IOW('S', 0x00, struct vpss_crt_grp_cfg)
 #define CVI_VPSS_DESTROY_GROUP _IOW('S', 0x01, VPSS_GRP)
@@ -282,6 +309,7 @@ struct vpss_scene {
 #define CVI_VPSS_STITCH _IOWR('S', 0x47, struct _vpss_stitch_cfg)
 #define CVI_VPSS_SET_CHN_FISHEYE _IOW('S', 0x48, struct vpss_chn_fisheye_cfg)
 #define CVI_VPSS_GET_CHN_FISHEYE _IOWR('S', 0x49, struct vpss_chn_fisheye_cfg)
+#define CVI_VPSS_BM_SEND_FRAME _IOWR('S', 0x50, struct _bm_vpss_cfg)
 
 /* Internal use */
 #define CVI_VPSS_SET_MODE _IOW('S', 0x75, __u32)
@@ -292,6 +320,7 @@ struct vpss_scene {
 #define CVI_VPSS_GET_AMP_CFG _IOWR('S', 0x7b, struct vpss_proc_amp_cfg)
 #define CVI_VPSS_GET_ALL_AMP _IOWR('S', 0x7c, struct vpss_all_proc_amp_cfg)
 #define CVI_VPSS_GET_SCENE _IOWR('S', 0x7d, struct vpss_scene)
+#define CVI_VPSS_SET_CHN_CSC_CFG _IOW('S', 0x7e, struct vpss_chn_csc_cfg)
 
 #ifdef __cplusplus
 }

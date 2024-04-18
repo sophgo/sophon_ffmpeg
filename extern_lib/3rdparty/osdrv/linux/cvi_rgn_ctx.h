@@ -6,6 +6,7 @@
 #endif
 
 #include <linux/cvi_comm_region.h>
+#include <linux/cvi_base_ctx.h>
 
 /*
  * @ion_len: canvas's ion length.
@@ -25,7 +26,11 @@ struct cvi_rgn_ctx {
 	CVI_U8 canvas_idx;
 	CVI_BOOL canvas_get;
 	CVI_BOOL odec_data_valid;
+	CVI_BOOL canvas_updated;
 	struct hlist_node node;
+	struct cvi_rgn_canvas_q rgn_canvas_waitq;
+	struct cvi_rgn_canvas_q rgn_canvas_doneq;
+	struct mutex rgn_canvas_q_lock;
 };
 
 #ifdef __cplusplus

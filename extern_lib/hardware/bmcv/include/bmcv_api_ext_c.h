@@ -98,6 +98,13 @@ typedef struct {
 
 #define BM_STITCH_MAX_SRC_NUM 4
 
+#define AFFINE_MAX_REGION_NUM 32
+#define FISHEYE_MAX_REGION_NUM 4
+
+#define GDC_MAX_REGION_NUM         4
+
+#define MAP_TABLE_SIZE 256
+
 typedef enum bmcv_heap_id_ {
     BMCV_HEAP0_ID = 0,
     BMCV_HEAP1_ID = 1,
@@ -145,6 +152,11 @@ typedef enum bm_image_format_ext_ {
     FORMAT_HSV180_PACKED,
     FORMAT_HSV256_PACKED,
     FORMAT_BAYER,
+    FORMAT_BAYER_RG8,
+    FORMAT_ARGB4444_PACKED,
+    FORMAT_ABGR4444_PACKED,
+    FORMAT_ARGB1555_PACKED,
+    FORMAT_ABGR1555_PACKED,
 } bm_image_format_ext;
 
 typedef enum csc_type {
@@ -156,6 +168,8 @@ typedef enum csc_type {
     CSC_RGB2YPbPr_BT601,
     CSC_YPbPr2RGB_BT709,
     CSC_RGB2YPbPr_BT709,
+    CSC_FANCY_PbPr_BT601 = 100,
+    CSC_FANCY_PbPr_BT709,
     CSC_USER_DEFINED_MATRIX = 1000,
     CSC_MAX_ENUM
 } csc_type_t;
@@ -209,7 +223,8 @@ typedef struct bmcv_rect {
 typedef enum bmcv_resize_algorithm_ {
     BMCV_INTER_NEAREST = 0,
     BMCV_INTER_LINEAR  = 1,
-    BMCV_INTER_BICUBIC = 2
+    BMCV_INTER_BICUBIC = 2,
+    BMCV_INTER_AREA = 3,
 } bmcv_resize_algorithm;
 
 typedef struct bmcv_padding_atrr_s {
@@ -224,18 +239,21 @@ typedef struct bmcv_padding_atrr_s {
 } bmcv_padding_attr_t;
 
 typedef struct {
-    unsigned short csc_coe00;
-    unsigned short csc_coe01;
-    unsigned short csc_coe02;
+    short csc_coe00;
+    short csc_coe01;
+    short csc_coe02;
     unsigned char csc_add0;
-    unsigned short csc_coe10;
-    unsigned short csc_coe11;
-    unsigned short csc_coe12;
+    unsigned char csc_sub0;
+    short csc_coe10;
+    short csc_coe11;
+    short csc_coe12;
     unsigned char csc_add1;
-    unsigned short csc_coe20;
-    unsigned short csc_coe21;
-    unsigned short csc_coe22;
+    unsigned char csc_sub1;
+    short csc_coe20;
+    short csc_coe21;
+    short csc_coe22;
     unsigned char csc_add2;
+    unsigned char csc_sub2;
 } csc_matrix_t;
 
 typedef struct bmcv_copy_to_atrr_s {
@@ -271,6 +289,13 @@ typedef struct bmcv_resize_image_s {
     unsigned char  padding_r;
     unsigned int   interpolation;
 } bmcv_resize_image;
+
+typedef enum {
+    NO_FLIP = 0,
+    HORIZONTAL_FLIP = 1,
+    VERTICAL_FLIP = 2,
+    ROTATE_180 = 3,
+} bmcv_flip_mode;
 
 typedef struct {
     int x;
@@ -425,7 +450,74 @@ typedef struct _bmcv_gdc_attr {
     int s32CenterXOffset;
     int s32CenterYOffset;
     int s32DistortionRatio;
+    bm_device_mem_t grid_info;
+    // char *grid_info;
 } bmcv_gdc_attr;
+
+typedef struct _bmcv_point2f_s {
+    float x;
+    float y;
+} bmcv_point2f_s;
+
+typedef struct _bmcv_size_s {
+    unsigned int u32Width;
+    unsigned int u32Height;
+} bmcv_size_s;
+
+typedef struct _bmcv_affine_attr_s {
+    unsigned int u32RegionNum;
+    bmcv_point2f_s astRegionAttr[AFFINE_MAX_REGION_NUM][4];
+    bmcv_size_s stDestSize;
+} bmcv_affine_attr_s;
+
+typedef enum _bmcv_fisyeye_mount_mode_e {
+    BMCV_FISHEYE_DESKTOP_MOUNT = 0,
+    BMCV_FISHEYE_CEILING_MOUNT = 1,
+    BMCV_FISHEYE_WALL_MOUNT = 2,
+    BMCV_FISHEYE_MOUNT_MODE_BUTT
+} bmcv_fisyeye_mount_mode_e;
+
+typedef enum _bmcv_usage_mode {
+    BMCV_MODE_PANORAMA_360 = 1,
+    BMCV_MODE_PANORAMA_180 = 2,
+    BMCV_MODE_01_1O = 3,
+    BMCV_MODE_02_1O4R = 4,
+    BMCV_MODE_03_4R = 5,
+    BMCV_MODE_04_1P2R = 6,
+    BMCV_MODE_05_1P2R = 7,
+    BMCV_MODE_06_1P = 8,
+    BMCV_MODE_07_2P = 9,
+    BMCV_MODE_STEREO_FIT = 10,
+    BMCV_MODE_MAX
+} bmcv_usage_mode;
+
+/* View mode of client*/
+typedef enum _bmcv_fisheye_view_mode_e {
+    BMCV_FISHEYE_VIEW_360_PANORAMA = 0,
+    BMCV_FISHEYE_VIEW_180_PANORAMA = 1,
+    BMCV_FISHEYE_VIEW_NORMAL = 2,
+    BMCV_FISHEYE_NO_TRANSFORMATION = 3,
+    BMCV_FISHEYE_VIEW_MODE_BUTT
+} bmcv_fisheye_view_mode_e;
+
+typedef struct _bmcv_fisheye_attr_s {
+    bool bEnable;
+    bool bBgColor;
+    unsigned int u32BgColor;
+
+    int s32HorOffset;
+    int s32VerOffset;
+
+    unsigned int u32TrapezoidCoef;
+    int s32FanStrength;
+
+    bmcv_fisyeye_mount_mode_e enMountMode;
+
+    bmcv_usage_mode enUseMode;
+    unsigned int u32RegionNum;
+    bmcv_fisheye_view_mode_e enViewMode;
+    bm_device_mem_t grid_info;
+} bmcv_fisheye_attr_s;
 
 enum bm_stitch_wgt_mode {
     BM_STITCH_WGT_YUV_SHARE = 0,
@@ -460,23 +552,14 @@ typedef struct bmcv_ive_add_attr_s {
     unsigned short param_y;
 } bmcv_ive_add_attr;
 
-typedef enum frame2op_mod {
-    MOD_BYP = 0,
-    MOD_ADD,
-    MOD_AND,
-    MOD_SUB,
-    MOD_OR,
-    MOD_XOR,
-} bm_ive_frame2op_mod;
-
-typedef enum bm_ive_sub_mode_e{
+typedef enum bmcv_ive_sub_mode_e{
     IVE_SUB_ABS = 0x0,   // Absolute value of the difference
     IVE_SUB_SHIFT = 0x1, // The output result is obtained by s_fting the result one digit right to reserve the signed bit
     IVE_SUB_BUTT
-} bm_ive_sub_mode;
+} bmcv_ive_sub_mode;
 
 typedef struct bmcv_ive_sub_attr_s {
-    bm_ive_sub_mode enMode;
+    bmcv_ive_sub_mode en_mode;
 } bmcv_ive_sub_attr;
 
 /*
@@ -495,7 +578,7 @@ typedef struct bmcv_ive_sub_attr_s {
                           dstVal = midVal; srcVal > _ghThr, dstVal = srcVal.
 */
 
-typedef enum bm_ive_thresh_mode_e{
+typedef enum bmcv_ive_thresh_mode_e{
     // u8
     IVE_THRESH_BINARY = 0x0,
     IVE_THRESH_TRUNC = 0x1,
@@ -505,21 +588,18 @@ typedef enum bm_ive_thresh_mode_e{
     IVE_THRESH_MIN_MID_ORI = 0x5,
     IVE_THRESH_MIN_ORI_MAX = 0x6,
     IVE_THRESH_ORI_MID_ORI = 0x7,
-    IVE_THRESH_BUTT = 0x8,
 
     // s16
-    IVE_THRESH_S16_TO_S8_MIN_MID_MAX = 0x9,
-    IVE_THRESH_S16_TO_S8_MIN_ORI_MAX = 0x10,
-    IVE_THRESH_S16_TO_U8_MIN_MID_MAX = 0x11,
-    IVE_THRESH_S16_TO_U8_MIN_ORI_MAX = 0x12,
-    IVE_THRESH_S16_BUTT = 0x13,
+    IVE_THRESH_S16_TO_S8_MIN_MID_MAX = 0x8,
+    IVE_THRESH_S16_TO_S8_MIN_ORI_MAX = 0x9,
+    IVE_THRESH_S16_TO_U8_MIN_MID_MAX = 0x10,
+    IVE_THRESH_S16_TO_U8_MIN_ORI_MAX = 0x11,
 
     // u16
-    IVE_THRESH_U16_TO_U8_MIN_MID_MAX = 0x14,
-    IVE_THRESH_U16_TO_U8_MIN_ORI_MAX = 0x15,
-    IVE_THRESH_U16_BUTT
+    IVE_THRESH_U16_TO_U8_MIN_MID_MAX = 0x12,
+    IVE_THRESH_U16_TO_U8_MIN_ORI_MAX = 0x13,
 
-} bm_ive_thresh_mode;
+} bmcv_ive_thresh_mode;
 
 typedef enum bm_ive_thresh_op_mode_e {
     MOD_U8 = 0,
@@ -535,26 +615,28 @@ typedef struct bmcv_ive_thresh_attr_s {
     int max_val;
 } bmcv_ive_thresh_attr;
 
-typedef enum bm_ive_map_mode_s{
+typedef enum bmcv_ive_map_mode_s{
     IVE_MAP_U8 = 0x0,
     IVE_MAP_S16 = 0x1,
     IVE_MAP_U16 = 0x2,
     IVE_MAP_BUTT
-} bm_ive_map_mode;
+} bmcv_ive_map_mode;
 
-typedef enum bm_ive_dma_mode_e {
+typedef enum bmcv_ive_dma_mode_e {
     IVE_DMA_DIRECT_COPY = 0x0,
-    IVE_DMA_INTERVAL_COPY = 0x1,
-    IVE_DMA_SET_3BYTE = 0x2,
-    IVE_DMA_SET_8BYTE = 0x3
-} bm_ive_dma_mode;
+    IVE_DMA_INTERVAL_COPY = 0x1
+} bmcv_ive_dma_mode;
 
-typedef struct bmcv_ive_dma_attr_s {
-    unsigned long long val;
+typedef enum bmcv_ive_dma_set_mode_e {
+    IVE_DMA_SET_3BYTE = 0x0,
+    IVE_DMA_SET_8BYTE = 0x1
+} bmcv_ive_dma_set_mode;
+
+typedef struct bmcv_ive_interval_dma_attr_s {
     unsigned char hor_seg_size;
     unsigned char elem_size;
     unsigned char ver_seg_rows;
-} bmcv_ive_dma_attr;
+} bmcv_ive_interval_dma_attr;
 
 typedef enum _ive_integ_out_ctrl_e {
     IVE_INTEG_MODE_COMBINE = 0x0,
@@ -564,88 +646,82 @@ typedef enum _ive_integ_out_ctrl_e {
 } ive_integ_out_ctrl_e;
 
 typedef struct bmcv_integ_ctrl_t{
-    ive_integ_out_ctrl_e enOutCtrl;
-} bmcv_integ_ctrl_s;
+    ive_integ_out_ctrl_e en_out_ctrl;
+} bmcv_ive_integ_ctrl_s;
 
 typedef struct _bmcv_ive_ncc_dst_mem_s{
-    unsigned long long u64Numerator;
-    unsigned long long u64QuadSum1;
-    unsigned long long u64QuadSum2;
-    unsigned char u8Reserved[8];
+    unsigned long long u64_numerator;
+    unsigned long long u64_quad_sum1;
+    unsigned long long u64_quad_sum2;
+    unsigned char u8_reserved[8];
 }bmcv_ive_ncc_dst_mem_t;
 
 typedef enum _bmcv_ord_stat_filter_mode_e{
     BM_IVE_ORD_STAT_FILTER_MEDIAN = 0x0,
     BM_IVE_ORD_STAT_FILTER_MAX    = 0x1,
     BM_IVE_ORD_STAT_FILTER_MIN    = 0x2,
-} bmcv_ord_stat_filter_mode;
+} bmcv_ive_ord_stat_filter_mode;
 
-typedef enum bm_lbp_cmp_mode_e{
+typedef enum bmcv_lbp_cmp_mode_e{
     BM_IVE_LBP_CMP_MODE_NORMAL = 0x0, /* P(x)-P(center)>= un8BitThr.s8Val, s(x)=1; else s(x)=0; */
     BM_IVE_LBP_CMP_MODE_ABS    = 0x1, /* Abs(P(x)-P(center))>=un8BitThr.u8Val, s(x)=1; else s(x)=0; */
-} bm_lbp_cmp_mode;
+} bmcv_lbp_cmp_mode;
 
-typedef union bm_ive_8bit_u{
-    signed char  s8Val;
-    unsigned char u8Val;
-} bm_ive_8bit;
+typedef union bmcv_ive_8bit_u{
+    signed char  s8_val;
+    unsigned char u8_val;
+} bmcv_ive_8bit;
 
-typedef struct bm_lbp_ctrl_attr_s{
-    bm_lbp_cmp_mode enMode;
-    bm_ive_8bit     un8BitThr;
-} bm_lbp_ctrl_attr;
+typedef struct bmcv_lbp_ctrl_attr_s{
+    bmcv_lbp_cmp_mode en_mode;
+    bmcv_ive_8bit     un8_bit_thr;
+} bmcv_ive_lbp_ctrl_attr;
 
-typedef struct bm_ive_dilate_attr_s{
-    unsigned char au8Mask[25];  /*The template parameter value must be 0 or 255.*/
-} bm_ive_dilate_attr;
-
-typedef bm_ive_dilate_attr bm_ive_erode_attr;
-
-typedef enum bm_ive_magAndAng_outCtrl_e{
+typedef enum bmcv_ive_mag_and_ang_outctrl{
     BM_IVE_MAG_AND_ANG_OUT_MAG = 0x0,  /*Only the magnitude is output.*/
     BM_IVE_MAG_AND_ANG_OUT_ALL = 0X1,  /*The magnitude and angle are output.*/
-} bm_ive_magAndAng_outCtrl;
+} bmcv_ive_mag_and_ang_outctrl;
 
-typedef struct bm_ive_magAndAng_ctrl_s{
-    bm_ive_magAndAng_outCtrl   enOutCtrl;
-    unsigned short             u16Thr;
-    signed char                as8Mask[25];  /*Template paramter*/
-} bm_ive_magAndAng_ctrl;
+typedef struct bmcv_ive_mag_and_ang_ctrl_s{
+    bmcv_ive_mag_and_ang_outctrl     en_out_ctrl;
+    unsigned short               u16_thr;
+    signed char                  as8_mask[25];  /*Template paramter*/
+} bmcv_ive_mag_and_ang_ctrl;
 
-typedef enum bm_ive_sobel_out_mode_e{
+typedef enum bmcv_ive_sobel_out_mode_e{
     BM_IVE_SOBEL_OUT_MODE_BOTH = 0x0, /*Output horizontal and vertical*/
     BM_IVE_SOBEL_OUT_MODE_HOR  = 0x1, /*Output horizontal*/
     BM_IVE_SOBEL_OUT_MODE_VER  = 0X2, /*Output vertical*/
-} bm_ive_sobel_out_mode;
+} bmcv_ive_sobel_out_mode;
 
-typedef struct bm_ive_sobel_ctrl_s{
-    bm_ive_sobel_out_mode sobelMode;  // output mode
-    signed char as8Mask[25];          // Template parameter
-} bm_ive_sobel_ctrl;
+typedef struct bmcv_ive_sobel_ctrl_s{
+    bmcv_ive_sobel_out_mode sobel_mode;  // output mode
+    signed char as8_mask[25];          // Template parameter
+} bmcv_ive_sobel_ctrl;
 
-typedef enum bm_ive_normgrad_outmode_e{
+typedef enum bmcv_ive_normgrad_outmode_e{
     BM_IVE_NORM_GRAD_OUT_HOR_AND_VER = 0x0,
     BM_IVE_NORM_GRAD_OUT_HOR         = 0x1,
     BM_IVE_NORM_GRAD_OUT_VER         = 0x2,
     BM_IVE_NORM_GRAD_OUT_COMBINE     = 0x3,
-} bm_ive_normgrad_outmode;
+} bmcv_ive_normgrad_outmode;
 
-typedef struct bm_ive_normgrad_ctrl_s{
-    bm_ive_normgrad_outmode enMode;
-    signed char as8Mask[25];
-    unsigned char u8Norm;
-} bm_ive_normgrad_ctrl;
+typedef struct bmcv_ive_normgrad_ctrl_s{
+    bmcv_ive_normgrad_outmode en_mode;
+    signed char as8_mask[25];
+    unsigned char u8_norm;
+} bmcv_ive_normgrad_ctrl;
 
-typedef struct bm_ive_gmm_ctrl_s{
-    unsigned int u22q10NoiseVar;    // Initial noise Variance
-    unsigned int u22q10MaxVar;      // Max  Variance
-    unsigned int u22q10MinVar;      // Min  Variance
-    unsigned short u0q16LearnRate;  // Learning rate
-    unsigned short u0q16BgRatio;    // Background ratio
-    unsigned short u8q8VarThr;      // Variance Threshold
-    unsigned short u0q16InitWeight; // Initial Weight
-    unsigned char u8ModelNum;       // Model number: 3 or 5
-} bm_ive_gmm_ctrl;
+typedef struct bmcv_ive_gmm_ctrl_s{
+    unsigned int u22q10_noise_var;    // Initial noise Variance
+    unsigned int u22q10_max_var;      // Max  Variance
+    unsigned int u22q10_min_var;      // Min  Variance
+    unsigned short u0q16_learn_rate;  // Learning rate
+    unsigned short u0q16_bg_ratio;    // Background ratio
+    unsigned short u8q8_var_thr;      // Variance Threshold
+    unsigned short u0q16_init_weight; // Initial Weight
+    unsigned char u8_model_num;       // Model number: 3 or 5
+} bmcv_ive_gmm_ctrl;
 
 typedef enum gmm2_sns_factor_mode_e{
     SNS_FACTOR_MODE_GLB = 0x0, // Global sensitivity factor mode
@@ -657,21 +733,21 @@ typedef enum gmm2_life_update_factor_mode_e{
     LIFE_UPDATE_FACTOR_MODE_PIX = 0x1, // Pixel life update factor mode
 } gmm2_life_update_factor_mode;
 
-typedef struct bm_ive_gmm2_ctrl_s{
-    gmm2_sns_factor_mode enSnsFactorMode; // Sensitivity factor mode
-    gmm2_life_update_factor_mode enLifeUpdateFactorMode; // Life update factor mode
-    unsigned short u16GlbLifeUpdateFactor;         // Global life update factor (default: 4)
-    unsigned short u16LifeThr;                     // Life threshold (default: 5000)
-    unsigned short u16FreqInitVal;                 // Initial frequency (default: 20000)
-    unsigned short u16FreqReduFactor;              // Frequency reduction factor (default: 0xFF00)
-    unsigned short u16FreqAddFactor;               // Frequency adding factor (default: 0xEF)
-    unsigned short u16FreqThr;                     // Frequency threshold (default: 12000)
-    unsigned short u16VarRate;                     // Variation update rate (default: 1)
-    unsigned short u9q7MaxVar;                     // Max variation (default: (16 * 16)<<7)
-    unsigned short u9q7MinVar;                     // Min variation (default: ( 8 *  8)<<7)
-    unsigned char u8GlbSnsFactor;                  // Global sensitivity factor (default: 8)
-    unsigned char u8ModelNum;                      // Model number (range: 1~5, default: 3)
-} bm_ive_gmm2_ctrl;
+typedef struct bmcv_ive_gmm2_ctrl_s{
+    gmm2_sns_factor_mode en_sns_factor_mode; // Sensitivity factor mode
+    gmm2_life_update_factor_mode en_life_update_factor_mode; // Life update factor mode
+    unsigned short u16_glb_life_update_factor;         // Global life update factor (default: 4)
+    unsigned short u16_life_thr;                     // Life threshold (default: 5000)
+    unsigned short u16_freq_init_val;                 // Initial frequency (default: 20000)
+    unsigned short u16_freq_redu_factor;              // Frequency reduction factor (default: 0xFF00)
+    unsigned short u16_freq_add_factor;               // Frequency adding factor (default: 0xEF)
+    unsigned short u16_freq_thr;                     // Frequency threshold (default: 12000)
+    unsigned short u16_var_rate;                     // Variation update rate (default: 1)
+    unsigned short u9q7_max_var;                     // Max variation (default: (16 * 16)<<7)
+    unsigned short u9q7_min_var;                     // Min variation (default: ( 8 *  8)<<7)
+    unsigned char u8_glb_sns_factor;                  // Global sensitivity factor (default: 8)
+    unsigned char u8_model_num;                      // Model number (range: 1~5, default: 3)
+} bmcv_ive_gmm2_ctrl;
 
 typedef struct bm_ive_point_u16_s{
     unsigned short u16X;
@@ -683,231 +759,221 @@ typedef struct bm_ive_canny_stack_size_s{
     unsigned char u8Reserved[12];
 } bm_ive_canny_stack_size;
 
-typedef struct bm_ive_canny_hys_edge_ctrl_s{
-    bm_device_mem_t  stMem;
-    unsigned short u16LowThr;
-    unsigned short u16HighThr;
-    signed char as8Mask[25];
-} bm_ive_canny_hys_edge_ctrl;
+typedef struct bmcv_ive_canny_hys_edge_ctrl_s{
+    bm_device_mem_t  st_mem;
+    unsigned short u16_low_thr;
+    unsigned short u16_high_thr;
+    signed char as8_mask[25];
+} bmcv_ive_canny_hys_edge_ctrl;
 
-typedef struct bm_ive_filter_ctrl_s{
-    signed char as8Mask[25];  // Template parameter filter coefficient
-    unsigned char u8Norm;     // Normalization parameter, by right s_ft
-} bm_ive_filter_ctrl;
+typedef struct bmcv_ive_filter_ctrl_s{
+    signed char as8_mask[25];  // Template parameter filter coefficient
+    unsigned char u8_norm;     // Normalization parameter, by right s_ft
+} bmcv_ive_filter_ctrl;
 
-typedef enum bm_ive_csc_mode_e{
-    /*CSC: YUV2RGB, video transfer mode, RGB value range [16, 235]*/
-    BM_IVE_VIDEO_BT601_YUV2RGB = 0x0,
+typedef struct bmcv_ive_stcandicorner_attr_s{
+    bm_device_mem_t st_mem;
+    unsigned char   u0q8_quality_level;
+} bmcv_ive_stcandicorner_attr;
 
-    /*CSC: YUV2RGB, video transfer mode, RGB value range [16, 235]*/
-    BM_IVE_VIDEO_BT709_YUV2RGB = 0x1,
+typedef struct bmcv_ive_st_max_eig_s{
+    unsigned short u16_max_eig;       // S_-Tomasi second step output MaxEig
+    unsigned char  u8_reserved[14];  // For 16 byte align
+} bmcv_ive_st_max_eig;
 
-    /*CSC: YUV2RGB, picture transfer mode, RGB value range [0, 255]*/
-    BM_IVE_PIC_BT601_YUV2RGB = 0x2,
-
-    /*CSC: YUV2RGB, picture transfer mode, RGB value range [0, 255]*/
-    BM_IVE_PIC_BT709_YUV2RGB = 0x3,
-
-    /*CSC: YUV2HSV, picture transfer mode, HSV value range [0, 255]*/
-    BM_IVE_PIC_BT601_YUV2HSV = 0x4,
-
-    /*CSC: YUV2HSV, picture transfer mode, HSV value range [0, 255]*/
-    BM_IVE_PIC_BT709_YUV2HSV = 0x5,
-
-    /*CSC: YUV2LAB, picture transfer mode, Lab value range [0, 255]*/
-    BM_IVE_PIC_BT601_YUV2LAB = 0x6,
-
-    /*CSC: YUV2LAB, picture transfer mode, Lab value range [0, 255]*/
-    BM_IVE_PIC_BT709_YUV2LAB = 0x7,
-
-    /*CSC: RGB2YUV, video transfer mode, YUV value range [0, 255]*/
-    BM_IVE_VIDEO_BT601_RGB2YUV = 0x8,
-
-    /*CSC: RGB2YUV, video transfer mode, YUV value range [0, 255]*/
-    BM_IVE_VIDEO_BT709_RGB2YUV = 0x9,
-
-    /*CSC: RGB2YUV, picture transfer mode, Y:[16, 235],U\V:[16, 240]*/
-    BM_IVE_PIC_BT601_RGB2YUV = 0xa,
-
-    /*CSC: RGB2YUV, picture transfer mode, Y:[16, 235],U\V:[16, 240]*/
-    BM_IVE_PIC_BT709_RGB2YUV = 0xb,
-    BM_IVE_PIC_RGB2HSV = 0xb,
-    BM_IVE_PIC_RGB2GRAY = 0xc,
-} bm_ive_csc_mode;
-
-typedef enum bm_ive_resize_mode_e{
-    IVE_RESIZE_LINEAR = 0,  // Bilinear interpolation
-    IVE_RESIZE_AREA = 1,    // Area-based (or super) interpolation
-} bm_ive_resize_mode;
-
-typedef struct bm_ive_resize_attr_s{
-    bm_ive_resize_mode   enMode;
-    unsigned short       u16Num;
-} bm_ive_resize_attr;
-
-typedef struct bm_ive_stCandiCorner_attr_s{
-    bm_device_mem_t stMem;
-    unsigned char   u0q8QualityLevel;
-} bm_ive_stCandiCorner_attr;
-
-typedef struct bm_ive_st_max_eig_s{
-    unsigned short u16MaxEig;       // S_-Tomasi second step output MaxEig
-    unsigned char  u8Reserved[14];  // For 16 byte align
-} bm_ive_st_max_eig;
-
-typedef enum bm_ive_gradFg_mode_e{
+typedef enum bmcv_ive_gradfg_mode_e{
     GRAD_FG_MODE_USE_CUR_GRAD = 0x0,
     GRAD_FG_MODE_FIND_MIN_GRAD = 0x1,
-} bm_ive_gradFg_mode;
+} bmcv_ive_gradfg_mode;
 
-typedef struct bm_ive_gradFg_attr_s{
-    bm_ive_gradFg_mode enMode;    // Calculation mode
-    unsigned short u16EdwFactor;  // Edge width adjustment factor (range: 500 to 2000; default: 1000)
-    unsigned char u8CrlCoefThr;   // Gradient vector correlation coefficient threshold (ranges: 50 to 100; default: 80)
-    unsigned char u8MagCrlThr;    // Gradient amplitude threshold (range: 0 to 20; default: 4)
-    unsigned char u8MinMagDiff;   // Gradient magnitude difference threshold (range: 2 to 8; default: 2)
-    unsigned char u8NoiseVal;     // Gradient amplitude noise threshold (range: 1 to 8; default: 1)
-    unsigned char u8EdwDark;      // Black pixels enable flag (range: 0 (no), 1 (yes); default: 1)
-} bm_ive_gradFg_attr;
+typedef struct bmcv_ive_gradfg_attr_s{
+    bmcv_ive_gradfg_mode en_mode;    // Calculation mode
+    unsigned short u16_edw_factor;  // Edge width adjustment factor (range: 500 to 2000; default: 1000)
+    unsigned char u8_crl_coef_thr;   // Gradient vector correlation coefficient threshold (ranges: 50 to 100; default: 80)
+    unsigned char u8_mag_crl_thr;    // Gradient amplitude threshold (range: 0 to 20; default: 4
+    unsigned char u8_min_mag_diff;   // Gradient magnitude difference threshold (range: 2 to 8; default: 2)
+    unsigned char u8_noise_val;     // Gradient amplitude noise threshold (range: 1 to 8; default: 1)
+    unsigned char u8_edw_dark;      // Black pixels enable flag (range: 0 (no), 1 (yes); default: 1)
+} bmcv_ive_gradfg_attr;
 
-typedef enum bm_ive_sad_mode_e{
+typedef enum bmcv_ive_sad_mode_e{
     BM_IVE_SAD_MODE_MB_4X4 = 0x0,   // 4x4
     BM_IVE_SAD_MODE_MB_8X8 = 0x1,   // 8x8
     BM_IVE_SAD_MODE_MB_16X16 = 0x2, // 16x16
-} bm_ive_sad_mode;
+} bmcv_ive_sad_mode;
 
-typedef enum bm_ive_sad_out_ctrl_s{
-    BM_IVE_SAD_OUT_16BIT_BOTH = 0x0,   // Output 16 bit sad and thresh
-    BM_IVE_SAD_OUT_8BIT_BOTH  = 0x1,   // Output 8 bit sad and thresh
-    BM_IVE_SAD_OUT_16BIT_SAD  = 0x2,   // Output 16 bit sad
-    BM_IVE_SAD_OUT_8BIT_SAD   = 0x3,   // Output 8 bit sad
-    BM_IVE_SAD_OUT_THRESH     = 0x4,   // Output thresh,16 bits sad
-} bm_ive_sad_out_ctrl;
+typedef enum bmcv_ive_sad_out_ctrl_s{
+    BM_IVE_SAD_OUT_BOTH = 0x0,   // Output sad and thresh 16/8
+    BM_IVE_SAD_OUT_SAD  = 0x1,   // Output sad 16/8
+    BM_IVE_SAD_OUT_THRESH  = 0x2,   // Output 16 thresh
+} bmcv_ive_sad_out_ctrl;
 
-typedef struct bm_ive_sad_attr_s{
-    bm_ive_sad_mode enMode;
-    bm_ive_sad_out_ctrl enOutCtrl;
-    unsigned short u16Thr;   // srcVal <= u16Thr, dstVal = minVal; srcVal > u16Thr, dstVal = maxVal
-    unsigned char  u8MinVal; // max value
-    unsigned char  u8MaxVal; // min value
-} bm_ive_sad_attr;
+typedef struct bmcv_ive_sad_attr_s{
+    bmcv_ive_sad_mode en_mode;
+    bmcv_ive_sad_out_ctrl en_out_ctrl;
+} bmcv_ive_sad_attr;
 
-typedef struct bm_ive_work_bg_pix_s{
-    unsigned short u8q4f4Mean; // 0# background grays value
-    unsigned short u16AccTime; // ackground cumulative access time
-    unsigned char u8PreGray;   // Gray value of last pixel
-    unsigned char u5q3DiffThr; // Differential threshold
-    unsigned char u8AccFlag;   // Background access flag
-    unsigned char u8BgGray[3]; // 1# ~ 3# background grays value
-} bm_ive_work_bg_pix;
+typedef struct bmcv_ive_sad_thresh_attr_s{
+    unsigned short u16_thr;   // srcVal <= u16Thr, dstVal = minVal; srcVal > u16Thr, dstVal = maxVal
+    unsigned char  u8_min_val; // max value
+    unsigned char  u8_max_val; // min value
+}bmcv_ive_sad_thresh_attr;
 
-typedef struct bm_ive_candi_bg_pix_s{
-    unsigned short u8q4f4Mean;       // Candidate background grays value
-    unsigned short u16StartTime;     // Candidate Background start time
-    unsigned short u16SumAccessTime; // Candidate Background cumulative access time
-    unsigned short u16ShortKeepTime; // Candidate background short hold time
-    unsigned char  u8ChgCond;        // Time condition for candidate background into the changing state
-    unsigned char  u8PotenBgLife;    // Potential background cumulative access time
-} bm_ive_candi_bg_pix;
+typedef struct bmcv_ive_work_bg_pix_s{
+    unsigned short u8q4f4_mean; // 0# background grays value
+    unsigned short u16_acc_time; // ackground cumulative access time
+    unsigned char u8_pre_gray;   // Gray value of last pixel
+    unsigned char u5q3_diff_thr; // Differential threshold
+    unsigned char u8_acc_flag;   // Background access flag
+    unsigned char u8_bg_gray[3]; // 1# ~ 3# background grays value
+} bmcv_ive_work_bg_pix;
 
-typedef struct bm_ive_bg_life_s{
-    unsigned char u8WorkBgLife[3]; // 1# ~ 3# background vitality
-    unsigned char u8CandiBgLife;   // Candidate background vitality
-} bm_ive_bg_life;
+typedef struct bmcv_ive_candi_bg_pix_s{
+    unsigned short u8q4f4_mean;       // Candidate background grays value
+    unsigned short u16_start_time;     // Candidate Background start time
+    unsigned short u16_sum_access_time; // Candidate Background cumulative access time
+    unsigned short u16_short_keep_time; // Candidate background short hold time
+    unsigned char  u8_chg_cond;        // Time condition for candidate background into the changing state
+    unsigned char  u8_poten_bg_life;    // Potential background cumulative access time
+} bmcv_ive_candi_bg_pix;
 
-typedef struct bm_ive_bg_model_pix_s{
-    bm_ive_work_bg_pix stWorkBgPixel; // Working background
-    bm_ive_candi_bg_pix stCandiPixel; // Candidate background
-    bm_ive_bg_life stBgLife;          // Background vitality
-} bm_ive_bg_model_pix;
+typedef struct bmcv_ive_bg_life_s{
+    unsigned char u8_work_bg_life[3]; // 1# ~ 3# background vitality
+    unsigned char u8_candi_bg_life;   // Candidate background vitality
+} bmcv_ive_bg_life;
 
-typedef struct bm_ive_bg_stat_data_s{
-    unsigned int u32PixNum;
-    unsigned int u32SumLum;
-    unsigned char u8Reserved[8];
-} bm_ive_bg_stat_data;
+typedef struct bmcv_ive_bg_model_pix_s{
+    bmcv_ive_work_bg_pix st_work_bg_pixel; // Working background
+    bmcv_ive_candi_bg_pix st_candi_pixel; // Candidate background
+    bmcv_ive_bg_life st_bg_life;          // Background vitality
+} bmcv_ive_bg_model_pix;
 
-typedef struct bm_ive_match_bgmodel_attr_s{
-    unsigned int u32CurFrmNum;  // Current frame timestamp, in frame units
-    unsigned int u32PreFrmNum;  // Previous frame timestamp, in frame units
-    unsigned short u16TimeThr;  // Potential background replacement time threshold (range: 2 to 100 frames; default: 20)
+typedef struct bmcv_ive_bg_stat_data_s{
+    unsigned int u32_pix_num;
+    unsigned int u32_sum_lum;
+    unsigned char u8_reserved[8];
+} bmcv_ive_bg_stat_data;
+
+typedef struct bmcv_ive_match_bgmodel_attr_s{
+    unsigned int u32_cur_frm_num;  // Current frame timestamp, in frame units
+    unsigned int u32_pre_frm_num;  // Previous frame timestamp, in frame units
+    unsigned short u16_time_thr;  // Potential background replacement time threshold (range: 2 to 100 frames; default: 20)
 
     /*
      * Correlation coefficients between differential threshold and gray value
      * (range: 0 to 5; default: 0)
      */
-    unsigned char u8DiffThrCrlCoef;
-    unsigned char u8DiffMaxThr; // Maximum of background differential threshold (range: 3 to 15; default: 6)
-    unsigned char u8DiffMinThr; // Minimum of background differential threshold (range: 3 to 15; default: 4)
-    unsigned char u8DiffThrInc; // Dynamic Background differential threshold increment (range: 0 to 6; default: 0)
-    unsigned char u8FastLearnRate; // Quick background learning rate (range: 0 to 4; default: 2)
-    unsigned char u8DetChgRegion;   // Whether to detect change region (range: 0 (no), 1 (yes); default: 0)
-} bm_ive_match_bgmodel_attr;
+    unsigned char u8_diff_thr_crl_coef;
+    unsigned char u8_diff_max_thr; // Maximum of background differential threshold (range: 3 to 15; default: 6)
+    unsigned char u8_diff_min_thr; // Minimum of background differential threshold (range: 3 to 15; default: 4)
+    unsigned char u8_diff_thr_inc; // Dynamic Background differential threshold increment (range: 0 to 6; default: 0)
+    unsigned char u8_fast_learn_rate; // Quick background learning rate (range: 0 to 4; default: 2)
+    unsigned char u8_det_chg_region;   // Whether to detect change region (range: 0 (no), 1 (yes); default: 0)
+} bmcv_ive_match_bgmodel_attr;
 
-typedef struct bm_ive_update_bgmodel_attr_s{
-    unsigned int u32CurFrmNum;    // Current frame timestamp, in frame units
-    unsigned int u32PreChkTime;   // The last time when background status is checked
-    unsigned int u32FrmChkPeriod; // Background status checking period (range: 0 to 2000 frames; default: 50)
-    unsigned int u32InitMinTime;  // Background initialization shortest time (range: 20 to 6000 frames; default: 100)
+typedef struct bmcv_ive_update_bgmodel_attr_s{
+    unsigned int u32_cur_frm_num;    // Current frame timestamp, in frame units
+    unsigned int u32_pre_chk_time;   // The last time when background status is checked
+    unsigned int u32_frm_chk_period; // Background status checking period (range: 0 to 2000 frames; default: 50)
+    unsigned int u32_init_min_time;  // Background initialization shortest time (range: 20 to 6000 frames; default: 100)
     /*
      * Steady background integration shortest time
      * (range: 20 to 6000 frames; default: 200)
      */
-    unsigned int u32StyBgMinBlendTime;
+    unsigned int u32_sty_bg_min_blend_time;
     /*
      * Steady background integration longest time
      * (range: 20 to 40000 frames; default: 1500)
      */
-    unsigned int u32StyBgMaxBlendTime;
+    unsigned int u32_sty_bg_max_blend_time;
     /*
      * Dynamic background integration shortest time
      * (range: 0 to 6000 frames; default: 0)
      */
 
-    unsigned int u32DynBgMinBlendTime;
-    unsigned int u32StaticDetMinTime; // Still detection shortest time (range: 20 to 6000 frames; default: 80)
-    unsigned short u16FgMaxFadeTime;  // Foreground disappearing longest time (range: 1 to 255 seconds; default: 15)
-    unsigned short u16BgMaxFadeTime;  // Background disappearing longest time (range: 1 to 255  seconds ; default: 60)
+    unsigned int u32_dyn_bg_min_blend_time;
+    unsigned int u32_static_det_min_time; // Still detection shortest time (range: 20 to 6000 frames; default: 80)
+    unsigned short u16_fg_max_fade_time;  // Foreground disappearing longest time (range: 1 to 255 seconds; default: 15)
+    unsigned short u16_bg_max_fade_time;  // Background disappearing longest time (range: 1 to 255  seconds ; default: 60)
 
-    unsigned char u8StyBgAccTimeRateThr; // Steady background access time ratio threshold (range: 10 to 100; default: 80)
-    unsigned char u8ChgBgAccTimeRateThr; // Change background access time ratio threshold (range: 10 to 100; default: 60)
-    unsigned char u8DynBgAccTimeThr;     // Dynamic background access time ratio threshold (range: 0 to 50; default: 0)
-    unsigned char u8DynBgDepth;          // Dynamic background depth (range: 0 to 3; default: 3)
+    unsigned char u8_sty_bg_acc_time_rate_thr; // Steady background access time ratio threshold (range: 10 to 100; default: 80)
+    unsigned char u8_chg_bg_acc_time_rate_thr; // Change background access time ratio threshold (range: 10 to 100; default: 60)
+    unsigned char u8_dyn_bg_acc_time_thr;     // Dynamic background access time ratio threshold (range: 0 to 50; default: 0)
+    unsigned char u8_dyn_bg_depth;          // Dynamic background depth (range: 0 to 3; default: 3)
 
     /*
      * Background state time ratio threshold when initializing
      * (range: 90 to 100; default: 90)
      */
-    unsigned char u8BgEffStaRateThr;
-    unsigned char u8AcceBgLearn;  // Whether to accelerate background learning (range: 0 (no), 1 (yes); default: 0)
-    unsigned char u8DetChgRegion; // Whether to detect change region (range: 0 (no), 1 (yes); default: 0)
-} bm_ive_update_bgmodel_attr;
+    unsigned char u8_bg_eff_sta_rate_thr;
+    unsigned char u8_acce_bg_learn;  // Whether to accelerate background learning (range: 0 (no), 1 (yes); default: 0)
+    unsigned char u8_det_chg_region; // Whether to detect change region (range: 0 (no), 1 (yes); default: 0)
+} bmcv_ive_update_bgmodel_attr;
 
-typedef enum bm_ive_ccl_mode_e{
+typedef enum bmcv_ive_ccl_mode_e{
     BM_IVE_CCL_MODE_4C = 0x0, // 4-connected
     BM_IVE_CCL_MODE_8C = 0x1, // 8-connected
-} bm_ive_ccl_mode;
+} bmcv_ive_ccl_mode;
 
-typedef struct bm_ive_ccl_attr_s{
-    bm_ive_ccl_mode enMode;          // ccl mode
-    unsigned short  u16InitAreaThr;  // Init threshold of region area
-    unsigned short  u16Step;         // Increase area step for once
-} bm_ive_ccl_attr;
+typedef struct bmcv_ive_ccl_attr_s{
+    bmcv_ive_ccl_mode en_mode;          // ccl mode
+    unsigned short  u16_init_area_thr;  // Init threshold of region area
+    unsigned short  u16_step;         // Increase area step for once
+} bmcv_ive_ccl_attr;
 
-typedef struct bm_ive_region_s{
-    int u32Area;               // Represented by the pixel number
-    unsigned short u16Left;    // Circumscribed rectangle left border
-    unsigned short u16Right;   // Circumscribed rectangle right border
-    unsigned short u16Top;     // Circumscribed rectangle top border
-    unsigned short u16Bottom;  // Circumscribed rectangle bottom border
-} bm_ive_region;
+typedef struct bmcv_ive_region_s{
+    int u32_area;               // Represented by the pixel number
+    unsigned short u16_left;    // Circumscribed rectangle left border
+    unsigned short u16_right;   // Circumscribed rectangle right border
+    unsigned short u16_top;     // Circumscribed rectangle top border
+    unsigned short u16_bottom;  // Circumscribed rectangle bottom border
+} bmcv_ive_region;
 
-typedef struct bm_ive_ccblob_s{
-    unsigned short  u16CurAeraThr;  // Threshold of the result regions' area
-    signed char     s8LabelStatus;  // -1: Labeled failed ; 0: Labeled successfully
-    unsigned char   u8RegionNum;    // Number of valid region, non-continuous stored
-    bm_ive_region   astRegion[BM_IVE_MAX_REGION_NUM]; // Valid regions with 'u32Area>0' and 'label = ArrayIndex+1
-} bm_ive_ccblob;
+typedef struct bmcv_ive_ccblob_s{
+    unsigned short    u16_cur_aera_thr;  // Threshold of the result regions' area
+    signed char       s8_label_status;  // -1: Labeled failed ; 0: Labeled successfully
+    unsigned char     u8_region_num;    // Number of valid region, non-continuous stored
+    bmcv_ive_region   ast_region[BM_IVE_MAX_REGION_NUM]; // Valid regions with 'u32Area>0' and 'label = ArrayIndex+1
+} bmcv_ive_ccblob;
+
+typedef enum bmcv_ive_bernsen_mode_e{
+    BM_IVE_BERNSEN_NORMAL = 0x0,  // Simple Bernsen thresh
+    BM_IVE_BERNSEN_THRESH = 0x1,  // Thresh based on the global threshold and local Bernsen threshold
+    BM_IVE_BERNSEN_PAPER = 0x2,   // This method is same with original paper
+} bmcv_ive_bernsen_mode;
+
+typedef struct bmcv_ive_bernsen_attr_s{
+    bmcv_ive_bernsen_mode en_mode;
+    unsigned char u8_win_size;           // 3x3 or 5x5
+    unsigned char u8_thr;
+    unsigned char u8_contrast_threshold; // compare with midgray
+} bmcv_ive_bernsen_attr;
+
+typedef enum bmcv_ive_16bit_to_8bit_mode_e{
+    BM_IVE_S16_TO_S8 = 0x0,
+    BM_IVE_S16_TO_U8_ABS = 0x1,
+    BM_IVE_S16_TO_U8_BIAS = 0x2,
+    BM_IVE_U16_TO_U8 = 0x3,
+} bmcv_ive_16bit_to_8bit_mode;
+
+typedef struct bmcv_ive_16bit_to_8bit_attr_s{
+    bmcv_ive_16bit_to_8bit_mode mode;
+    unsigned short u16_denominator;
+    unsigned char u8_numerator;
+    signed char   s8_bias;
+} bmcv_ive_16bit_to_8bit_attr;
+
+typedef struct bmcv_ive_frame_diff_motion_attr_s{
+    bmcv_ive_sub_mode sub_mode;
+    bmcv_ive_thresh_mode thr_mode;
+    unsigned char u8_thr_low;
+    unsigned char u8_thr_high;
+    unsigned char u8_thr_min_val;
+    unsigned char u8_thr_mid_val;
+    unsigned char u8_thr_max_val;
+    unsigned char au8_erode_mask[25];
+    unsigned char au8_dilate_mask[25];
+} bmcv_ive_frame_diff_motion_attr;
 
 
 
@@ -1146,6 +1212,19 @@ DECL_EXPORT bm_status_t bmcv_image_watermark_repeat_superpose(
     bmcv_rect_t *       rects,
     bmcv_color_t        color);
 
+DECL_EXPORT bm_status_t bmcv_image_overlay(
+    bm_handle_t         handle,
+    bm_image            image,
+    int                 overlay_num,
+    bmcv_rect_t*        overlay_info,
+    bm_image*           overlay_image);
+
+DECL_EXPORT bm_status_t bmcv_image_flip(
+    bm_handle_t          handle,
+    bm_image             input,
+    bm_image             output,
+    bmcv_flip_mode       flip_mode);
+
 // quality_factor = 84
 DECL_EXPORT bm_status_t bmcv_image_jpeg_enc(
     bm_handle_t handle,
@@ -1254,6 +1333,11 @@ DECL_EXPORT bm_status_t bmcv_image_threshold(
     unsigned char max_value,
     bm_thresh_type_t type);
 
+DECL_EXPORT bm_status_t bmcv_image_quantify(
+        bm_handle_t handle,
+        bm_image input,
+        bm_image output);
+
 DECL_EXPORT bm_status_t bmcv_min_max(
     bm_handle_t handle,
     bm_device_mem_t input,
@@ -1271,6 +1355,13 @@ DECL_EXPORT bm_status_t bmcv_cmulp(
     bm_device_mem_t outputImag,
     int batch,
     int len);
+
+DECL_EXPORT bm_status_t bmcv_image_warp(
+    bm_handle_t              handle,
+    int                      image_num,
+    bmcv_affine_image_matrix matrix[4],
+    bm_image *               input,
+    bm_image *               output);
 
 DECL_EXPORT bm_status_t bmcv_image_warp_affine(
     bm_handle_t              handle,
@@ -1494,6 +1585,68 @@ DECL_EXPORT bm_status_t bmcv_calc_hist_with_weight(
     const float *ranges,
     int inputDtype);
 
+DECL_EXPORT bm_status_t bmcv_gemm(
+    bm_handle_t handle,
+    bool is_A_trans,
+    bool is_B_trans,
+    int M,
+    int N,
+    int K,
+    float alpha,
+    bm_device_mem_t A,
+    int lda,
+    bm_device_mem_t B,
+    int ldb,
+    float beta,
+    bm_device_mem_t C,
+    int ldc);
+
+DECL_EXPORT bm_status_t bmcv_gemm_ext(
+    bm_handle_t handle,
+    bool is_A_trans,
+    bool is_B_trans,
+    int M,
+    int N,
+    int K,
+    float alpha,
+    bm_device_mem_t A,
+    bm_device_mem_t B,
+    float beta,
+    bm_device_mem_t C,
+    bm_device_mem_t Y,
+    bm_image_data_format_ext in_dtype,
+    bm_image_data_format_ext out_dtype);
+
+DECL_EXPORT bm_status_t bmcv_feature_match_normalized(
+    bm_handle_t handle,
+    bm_device_mem_t input_data_global_addr,
+    bm_device_mem_t db_data_global_addr,
+    bm_device_mem_t db_feature_global_addr,
+    bm_device_mem_t output_similarity_global_addr,
+    bm_device_mem_t output_index_global_addr,
+    int batch_size,
+    int feature_size,
+    int db_size);
+
+DECL_EXPORT bm_status_t bmcv_feature_match(
+    bm_handle_t handle,
+    bm_device_mem_t input_data_global_addr,
+    bm_device_mem_t db_data_global_addr,
+    bm_device_mem_t output_sorted_similarity_global_addr,
+    bm_device_mem_t output_sorted_index_global_addr,
+    int batch_size,
+    int feature_size,
+    int db_size,
+    int sort_cnt,
+    int rshiftbits);
+
+DECL_EXPORT bm_status_t bmcv_hist_balance(
+    bm_handle_t handle,
+    bm_device_mem_t input,
+    bm_device_mem_t output,
+    int H,
+    int W);
+
 
 // dpu api
 
@@ -1562,6 +1715,24 @@ DECL_EXPORT bm_status_t bmcv_dwa_gdc(
     bm_image             output_image,
     bmcv_gdc_attr        ldc_attr);
 
+DECL_EXPORT bm_status_t bmcv_dwa_affine(
+    bm_handle_t          handle,
+    bm_image             input_image,
+    bm_image             output_image,
+    bmcv_affine_attr_s   affine_attr);
+
+DECL_EXPORT bm_status_t bmcv_dwa_fisheye(
+    bm_handle_t          handle,
+    bm_image             input_image,
+    bm_image             output_image,
+    bmcv_fisheye_attr_s  fisheye_attr);
+
+DECL_EXPORT bm_status_t bmcv_dwa_dewarp(
+    bm_handle_t          handle,
+    bm_image             input_image,
+    bm_image             output_image,
+    bm_device_mem_t      grid_info);
+
 DECL_EXPORT bm_status_t bmcv_blending(
     bm_handle_t handle,
     int       input_num,
@@ -1572,187 +1743,241 @@ DECL_EXPORT bm_status_t bmcv_blending(
 
 // ive api
 
-DECL_EXPORT bm_status_t bmcv_image_ive_frame2op(
+DECL_EXPORT bm_status_t bmcv_ive_add(
     bm_handle_t          handle,
-    void *               attr,
-    bm_ive_frame2op_mod  opType,
-    bm_image *           input1,
-    bm_image *           input2,
-    bm_image *           output);
+    bm_image             input1,
+    bm_image             input2,
+    bm_image             output,
+    bmcv_ive_add_attr    attr);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_thresh(
-    bm_handle_t             handle,
-    bm_ive_thresh_op_mode   opType,
-    bm_ive_thresh_mode      threshMode,
-    bmcv_ive_thresh_attr *  attr,
-    bm_image *              input,
-    bm_image *              output);
-
-DECL_EXPORT bm_status_t bmcv_image_ive_dma(
-    bm_handle_t             handle,
-    bm_ive_dma_mode         dma_mode,
-    bmcv_ive_dma_attr *     attr,
-    bm_image *              input,
-    bm_image *              output);
-
-DECL_EXPORT bm_status_t bmcv_image_ive_map(
-    bm_handle_t             handle,
-    bm_ive_map_mode         map_mode,
-    bm_image *              input,
-    bm_image *              output);
-
-DECL_EXPORT bm_status_t bmcv_image_ive_hist(
+DECL_EXPORT bm_status_t bmcv_ive_and(
     bm_handle_t          handle,
-    bm_image *           input,
-    bm_device_mem_t*     output,
-    int                  hist_size);
+    bm_image             input1,
+    bm_image             input2,
+    bm_image             output);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_integ(
+DECL_EXPORT bm_status_t bmcv_ive_or(
     bm_handle_t          handle,
-    bm_image *           input,
-    bm_device_mem_t*     output,
-    bmcv_integ_ctrl_s*   integ_attr);
+    bm_image             input1,
+    bm_image             input2,
+    bm_image             output);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_ncc(
+DECL_EXPORT bm_status_t bmcv_ive_xor(
     bm_handle_t          handle,
-    bm_image *           input1,
-    bm_image *           input2,
-    bm_device_mem_t*     output);
+    bm_image             input1,
+    bm_image             input2,
+    bm_image             output);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_ordStatFilter(
+DECL_EXPORT bm_status_t bmcv_ive_sub(
+    bm_handle_t          handle,
+    bm_image             input1,
+    bm_image             input2,
+    bm_image             output,
+    bmcv_ive_sub_attr    attr);
+
+DECL_EXPORT bm_status_t bmcv_ive_thresh(
     bm_handle_t               handle,
-    bm_image *                input,
-    bm_image *                output,
-    bmcv_ord_stat_filter_mode ordStatFilter_mode);
+    bm_image                  input,
+    bm_image                  output,
+    bmcv_ive_thresh_mode      thresh_mode,
+    bmcv_ive_thresh_attr      attr);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_lbp(
-    bm_handle_t          handle,
-    bm_image *           input,
-    bm_image *           output,
-    bm_lbp_ctrl_attr *   lbp_attr);
+DECL_EXPORT bm_status_t bmcv_ive_dma_set(
+    bm_handle_t                      handle,
+    bm_image                         image,
+    bmcv_ive_dma_set_mode            dma_set_mode,
+    unsigned long long               val);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_dilate(
-    bm_handle_t           handle,
-    bm_image *            input,
-    bm_image *            output,
-    bm_ive_dilate_attr *  dilate_attr);
+DECL_EXPORT bm_status_t bmcv_ive_dma(
+    bm_handle_t                      handle,
+    bm_image                         input,
+    bm_image                         output,
+    bmcv_ive_dma_mode                dma_mode,
+    bmcv_ive_interval_dma_attr *     attr);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_erode(
-    bm_handle_t           handle,
-    bm_image *            input,
-    bm_image *            output,
-    bm_ive_erode_attr *  erode_attr);
-
-DECL_EXPORT bm_status_t bmcv_image_ive_magAndAng(
+DECL_EXPORT bm_status_t bmcv_ive_map(
     bm_handle_t             handle,
-    bm_image *              input,
-    bm_image *              magOutput,
-    bm_image *              angOutput,
-    bm_ive_magAndAng_ctrl * magAndAng_attr);
+    bm_image                input,
+    bm_image                output,
+    bm_device_mem_t         map_table);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_sobel(
-    bm_handle_t         handle,
-    bm_image *          input,
-    bm_image *          hOutput,
-    bm_image *          vOutput,
-    bm_ive_sobel_ctrl * sobel_attr);
+DECL_EXPORT bm_status_t bmcv_ive_hist(
+    bm_handle_t          handle,
+    bm_image             input,
+    bm_device_mem_t      output);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_normgrad(
+DECL_EXPORT bm_status_t bmcv_ive_integ(
+    bm_handle_t              handle,
+    bm_image                 input,
+    bm_device_mem_t          output,
+    bmcv_ive_integ_ctrl_s    integ_attr);
+
+DECL_EXPORT bm_status_t bmcv_ive_ncc(
+    bm_handle_t          handle,
+    bm_image             input1,
+    bm_image             input2,
+    bm_device_mem_t      output);
+
+DECL_EXPORT bm_status_t bmcv_ive_ord_stat_filter(
+    bm_handle_t                   handle,
+    bm_image                      input,
+    bm_image                      output,
+    bmcv_ive_ord_stat_filter_mode mode);
+
+DECL_EXPORT bm_status_t bmcv_ive_lbp(
+    bm_handle_t              handle,
+    bm_image                 input,
+    bm_image                 output,
+    bmcv_ive_lbp_ctrl_attr   lbp_attr);
+
+DECL_EXPORT bm_status_t bmcv_ive_dilate(
+    bm_handle_t           handle,
+    bm_image              input,
+    bm_image              output,
+    unsigned char         dilate_mask[25]);
+
+DECL_EXPORT bm_status_t bmcv_ive_erode(
+    bm_handle_t           handle,
+    bm_image              input,
+    bm_image              output,
+    unsigned char         erode_mask[25]);
+
+DECL_EXPORT bm_status_t bmcv_ive_mag_and_ang(
+    bm_handle_t                   handle,
+    bm_image  *                   input,
+    bm_image  *                   mag_output,
+    bm_image  *                   ang_output,
+    bmcv_ive_mag_and_ang_ctrl     attr);
+
+DECL_EXPORT bm_status_t bmcv_ive_sobel(
+    bm_handle_t           handle,
+    bm_image *            input,
+    bm_image *            output_h,
+    bm_image *            output_v,
+    bmcv_ive_sobel_ctrl   sobel_attr);
+
+DECL_EXPORT bm_status_t bmcv_ive_norm_grad(
+    bm_handle_t              handle,
+    bm_image *               input,
+    bm_image *               output_h,
+    bm_image *               output_v,
+    bm_image *               output_hv,
+    bmcv_ive_normgrad_ctrl   normgrad_attr);
+
+DECL_EXPORT bm_status_t bmcv_ive_gmm(
+    bm_handle_t            handle,
+    bm_image               input,
+    bm_image               output_fg,
+    bm_image               output_bg,
+    bm_device_mem_t        output_model,
+    bmcv_ive_gmm_ctrl      gmm_attr);
+
+DECL_EXPORT bm_status_t bmcv_ive_gmm2(
     bm_handle_t            handle,
     bm_image *             input,
-    bm_image *             output_h,
-    bm_image *             output_v,
-    bm_image *             output_hv,
-    bm_ive_normgrad_ctrl * normgrad_attr);
+    bm_image *             input_factor,
+    bm_image *             output_fg,
+    bm_image *             output_bg,
+    bm_image *             output_match_model_info,
+    bm_device_mem_t        output_model,
+    bmcv_ive_gmm2_ctrl     gmm2_attr);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_gmm(
-    bm_handle_t          handle,
-    bm_image *           input,
-    bm_image *           output_fg,
-    bm_image *           output_bg,
-    bm_device_mem_t *    output_model,
-    bm_ive_gmm_ctrl *    gmm_attr);
+DECL_EXPORT bm_status_t bmcv_ive_canny(
+    bm_handle_t                    handle,
+    bm_image                       input,
+    bm_device_mem_t                output_edge,
+    bmcv_ive_canny_hys_edge_ctrl   canny_hys_edge_attr);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_gmm2(
-    bm_handle_t          handle,
-    bm_image *           input,
-    bm_image *           input_factor,
-    bm_image *           output_fg,
-    bm_image *           output_bg,
-    bm_image *           output_match_model_info,
-    bm_device_mem_t *    output_model,
-    bm_ive_gmm2_ctrl *   gmm2_attr);
-
-DECL_EXPORT bm_status_t bmcv_image_ive_canny(
+DECL_EXPORT bm_status_t bmcv_ive_filter(
     bm_handle_t                  handle,
-    bm_image *                   input,
-    bm_device_mem_t              output_edge,
-    bm_ive_canny_hys_edge_ctrl * canny_hys_edge_attr);
+    bm_image                     input,
+    bm_image                     output,
+    bmcv_ive_filter_ctrl         filter_attr);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_filter(
-    bm_handle_t                  handle,
-    bm_image *                   input,
-    bm_image *                   output,
-    bm_ive_filter_ctrl *         filter_attr);
-
-DECL_EXPORT bm_status_t bmcv_image_ive_csc(
+DECL_EXPORT bm_status_t bmcv_ive_csc(
     bm_handle_t     handle,
-    bm_image *      input,
-    bm_image *      output,
-    bm_ive_csc_mode csc_mode);
+    bm_image        input,
+    bm_image        output,
+    csc_type_t      csc_type);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_resize(
-    bm_handle_t            handle,
-    bm_ive_resize_attr *   resize_attr,
-    bm_image *             input,
-    bm_image *             output);
+DECL_EXPORT bm_status_t bmcv_ive_filter_and_csc(
+    bm_handle_t             handle,
+    bm_image                input,
+    bm_image                output,
+    bmcv_ive_filter_ctrl    attr,
+    csc_type_t              csc_type);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_stCandiCorner(
-    bm_handle_t      handle,
-    bm_image *       input,
-    bm_image *       output,
-    bm_ive_stCandiCorner_attr * stCandiCorner_attr);
+DECL_EXPORT bm_status_t bmcv_ive_resize(
+    bm_handle_t              handle,
+    bm_image                 input,
+    bm_image                 output,
+    bmcv_resize_algorithm    resize_mode);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_gradfg(
-    bm_handle_t           handle,
-    bm_image *            input_bgDiffFg,
-    bm_image *            input_curGrad,
-    bm_image *            intput_bgGrad,
-    bm_image *            output_gradFg,
-    bm_ive_gradFg_attr *  gradfg_attr);
+DECL_EXPORT bm_status_t bmcv_ive_stcandicorner(
+    bm_handle_t                   handle,
+    bm_image                      input,
+    bm_image                      output,
+    bmcv_ive_stcandicorner_attr   stcandicorner_attr);
 
-DECL_EXPORT bm_status_t bmcv_imgae_ive_sad(
-    bm_handle_t           handle,
-    bm_image *            input1,
-    bm_image *            input2,
-    bm_image *            output_sad,
-    bm_image *            output_thr,
-    bm_ive_sad_attr *     sad_attr);
+DECL_EXPORT bm_status_t bmcv_ive_gradfg(
+    bm_handle_t             handle,
+    bm_image                input_bgdiff_fg,
+    bm_image                input_fggrad,
+    bm_image                input_bggrad,
+    bm_image                output_gradfg,
+    bmcv_ive_gradfg_attr    gradfg_attr);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_match_bgmodel(
+DECL_EXPORT bm_status_t bmcv_ive_sad(
+    bm_handle_t                handle,
+    bm_image *                 input,
+    bm_image *                 output_sad,
+    bm_image *                 output_thr,
+    bmcv_ive_sad_attr *        sad_attr,
+    bmcv_ive_sad_thresh_attr*  thresh_attr);
+
+DECL_EXPORT bm_status_t bmcv_ive_match_bgmodel(
+    bm_handle_t                   handle,
+    bm_image                      cur_img,
+    bm_image                      bgmodel_img,
+    bm_image                      fgflag_img,
+    bm_image                      diff_fg_img,
+    bm_device_mem_t               stat_data_mem,
+    bmcv_ive_match_bgmodel_attr   attr);
+
+DECL_EXPORT bm_status_t bmcv_ive_update_bgmodel(
+    bm_handle_t                    handle,
+    bm_image  *                    cur_img,
+    bm_image  *                    bgmodel_img,
+    bm_image  *                    fgflag_img,
+    bm_image  *                    bg_img,
+    bm_image  *                    chgsta_img,
+    bm_device_mem_t                stat_data_mem,
+    bmcv_ive_update_bgmodel_attr   attr);
+
+DECL_EXPORT bm_status_t bmcv_ive_ccl(
     bm_handle_t          handle,
-    bm_image *           src_cur_img,
-    bm_image *           src_bgmodel_img,
-    bm_image *           src_fgflag_img,
-    bm_image *           dst_diff_fg_img,
-    bm_device_mem_t *    dst_stat_data_mem,
-    bm_ive_match_bgmodel_attr * matchBgmodel_attr);
+    bm_image             src_dst_image,
+    bm_device_mem_t      ccblob_output,
+    bmcv_ive_ccl_attr    ccl_attr);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_update_bgmodel(
-    bm_handle_t          handle,
-    bm_image *           src_bgmodel_img,
-    bm_image *           src_fgflag_img,
-    bm_image *           dst_bg_img,
-    bm_image *           dst_chgsta_img,
-    bm_device_mem_t  *   dst_stat_data_mem,
-    bm_ive_update_bgmodel_attr * updateBgmodel_attr);
+DECL_EXPORT bm_status_t bmcv_ive_bernsen(
+    bm_handle_t           handle,
+    bm_image              input,
+    bm_image              output,
+    bmcv_ive_bernsen_attr attr);
 
-DECL_EXPORT bm_status_t bmcv_image_ive_ccl(
-    bm_handle_t        handle,
-    bm_image *         src_dst_image,
-    bm_device_mem_t *  ccblob_output,
-    bm_ive_ccl_attr *  ccl_attr);
+DECL_EXPORT bm_status_t bmcv_ive_16bit_to_8bit(
+    bm_handle_t                 handle,
+    bm_image                    input,
+    bm_image                    output,
+    bmcv_ive_16bit_to_8bit_attr attr);
 
+DECL_EXPORT bm_status_t bmcv_ive_frame_diff_motion(
+    bm_handle_t                     handle,
+    bm_image                        input1,
+    bm_image                        input2,
+    bm_image                        output,
+    bmcv_ive_frame_diff_motion_attr attr);
 
 #if defined(__cplusplus)
 }

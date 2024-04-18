@@ -380,6 +380,7 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
         wrapped_mem.u.device.device_addr = (unsigned long long)frame->data[0];
         wrapped_mem.u.device.dmabuf_fd = 1;
         wrapped_mem.size = total_size;
+        wrapped_mem.flags.u.mem_type = BM_MEM_TYPE_DEVICE;
 
         framebuffer.y_stride    = frame->linesize[0];
         if (format != AV_PIX_FMT_GRAY8)
@@ -553,6 +554,7 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
         wrapped_mem.u.device.device_addr = (unsigned long long)frame->data[4];
         wrapped_mem.u.device.dmabuf_fd = 1;
         wrapped_mem.size = total_size;
+        wrapped_mem.flags.u.mem_type = BM_MEM_TYPE_DEVICE;
 
         framebuffer.y_stride    = frame->linesize[4];
         if (format != AV_PIX_FMT_GRAY8)

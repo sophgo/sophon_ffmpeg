@@ -35,7 +35,8 @@ extern "C" {
 	 (fmt == PIXEL_FORMAT_NV12) || (fmt == PIXEL_FORMAT_NV21) || \
 	 (fmt == PIXEL_FORMAT_NV16) || (fmt == PIXEL_FORMAT_NV61) || \
 	 (fmt == PIXEL_FORMAT_YUYV) || (fmt == PIXEL_FORMAT_UYVY) || \
-	 (fmt == PIXEL_FORMAT_YVYU) || (fmt == PIXEL_FORMAT_VYUY))
+	 (fmt == PIXEL_FORMAT_YVYU) || (fmt == PIXEL_FORMAT_VYUY) || \
+	 (fmt == PIXEL_FORMAT_YUV_444))
 
 #define IS_FMT_YUV420(fmt) \
 	((fmt == PIXEL_FORMAT_YUV_PLANAR_420) || \
@@ -185,6 +186,7 @@ typedef enum _PIXEL_FORMAT_E {
 	PIXEL_FORMAT_UYVY,
 	PIXEL_FORMAT_YVYU,
 	PIXEL_FORMAT_VYUY,
+	PIXEL_FORMAT_YUV_444,
 
 	PIXEL_FORMAT_FP32_C1 = 32, // 32
 	PIXEL_FORMAT_FP32_C3_PLANAR,
@@ -513,6 +515,7 @@ typedef struct _LDC_ATTR_S {
 	CVI_S32 s32DistortionRatio;
 	GRID_INFO_ATTR_S stGridInfoAttr;
 	CVI_BOOL bEnHWLDC;
+	ROTATION_E enRotation;
 } LDC_ATTR_S;
 // -------- If you want to change these interfaces, please contact the isp team. --------
 
@@ -559,6 +562,7 @@ typedef struct _VCODEC_PERF_FPS_S {
 	CVI_U32 u32InFPS;
 	CVI_U32 u32OutFPS;
 	CVI_U64 u64HwTime;
+	CVI_U64 u64MaxHwTime;
 } VCODEC_PERF_FPS_S;
 
 typedef enum {
