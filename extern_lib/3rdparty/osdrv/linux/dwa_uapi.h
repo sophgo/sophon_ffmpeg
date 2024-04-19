@@ -52,6 +52,7 @@ struct dwa_task_attr {
 		FISHEYE_ATTR_S stFishEyeAttr;
 		AFFINE_ATTR_S stAffineAttr;
 		LDC_ATTR_S stLdcAttr;
+		WARP_ATTR_S stWarpAttr;
 	};
 
 	CVI_U64 meshHandle;
@@ -80,6 +81,7 @@ struct dwa_chn_frm_cfg {
 #define CVI_DWA_SET_JOB_IDENTITY _IOW('D', 0x09, struct dwa_identity_attr)
 #define CVI_DWA_GET_WORK_JOB _IOR('D', 0x0a, struct dwa_handle_data)
 #define CVI_DWA_GET_CHN_FRM _IOWR('D', 0x0b, struct dwa_chn_frm_cfg)
+#define CVI_DWA_ADD_WAR_TASK _IOW('D', 0x0c, struct dwa_task_attr)
 
 #ifdef __cplusplus
 }

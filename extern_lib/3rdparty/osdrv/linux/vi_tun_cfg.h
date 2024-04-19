@@ -1474,7 +1474,8 @@ struct cvi_vip_teaisp_bnr_config {
 	__u32 blc;
 	__u32 coeff_a;
 	__u32 coeff_b;
-	__u32 filter_str_2d;
+	__u32 filter_motion_str_2d;
+	__u32 filter_static_str_2d;
 	__u32 filter_str_3d;
 };
 

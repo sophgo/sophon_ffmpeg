@@ -92,4 +92,15 @@ struct cvi_gdc_proc_ctx {
 	struct gdc_operation_status stFishEyeStatus;
 };
 
+struct cvi_rgn_canvas_ctx {
+	CVI_U64 u64PhyAddr;
+	CVI_U8 *pu8VirtAddr;
+	CVI_U32 u32Len;
+};
+
+struct cvi_rgn_canvas_q {
+	struct cvi_rgn_canvas_ctx **fifo;
+	int  front, tail, capacity;
+};
+
 #endif  /* __CVI_BASE_CTX_H__ */

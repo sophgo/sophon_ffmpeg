@@ -74,7 +74,9 @@ extra_ldflags="-L${extern_lib_path}/prebuilt/lib -Wl,-rpath=${extern_lib_path}/p
 
 extra_libs="-Wl,--start-group \
             -lrt -lssl -lcrypto -ldl -lresolv -lstdc++ -lgb28181_sip -lm \
-            -lbmlib -lbmjpeg -lbmvd -lbmvenc -lbmcv \
+            -lbmlib -lbmjpeg -lbmvd -lbmvenc -lbmcv -lispv4l2_helper \
+            -lae -laf -lawb -lcvi_bin -lcvi_bin_isp -lcvi_ispd2 -lisp \
+            -lisp_algo -lispv4l2_adapter -ljson-c -lsns_full -lcmodel \
             -Wl,--end-group"
 
 ./configure \

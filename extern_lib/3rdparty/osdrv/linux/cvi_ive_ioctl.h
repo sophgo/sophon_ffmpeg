@@ -10,6 +10,11 @@
 
 // #include "cvi_comm_ive.h"
 // #include "cvi_errno.h"
+struct cvi_ive_ioctl_arg {
+	void *buffer;
+	unsigned long input_data;
+	CVI_U32 u32Size;
+};
 
 struct cvi_ive_test_arg {
 	IVE_IMAGE_TYPE_E enType;
@@ -109,6 +114,7 @@ struct cvi_ive_ioctl_match_bgmodel_arg {
 
 struct cvi_ive_ioctl_update_bgmodel_arg {
 	IVE_HANDLE pIveHandle;
+	IVE_SRC_IMAGE_S stCurImg;
 	IVE_DATA_S stBgModel;
 	IVE_IMAGE_S stFgFlag;
 	IVE_DST_IMAGE_S stBgImg;
@@ -311,11 +317,11 @@ struct cvi_ive_ioctl_sad_arg {
 
 struct cvi_ive_ioctl_resize_arg {
 	IVE_HANDLE pIveHandle;
-	IVE_SRC_IMAGE_S *astSrc;
+	IVE_SRC_IMAGE_S stSrc;
 #ifdef __arm__
 		__u32 padding1;
 #endif
-	IVE_DST_IMAGE_S *astDst;
+	IVE_DST_IMAGE_S stDst;
 #ifdef __arm__
 		__u32 padding2;
 #endif

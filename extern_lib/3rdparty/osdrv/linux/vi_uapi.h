@@ -10,7 +10,6 @@
 #include <linux/time_types.h>
 #endif
 #include <linux/cvi_comm_vi.h>
-#include <linux/cvi_comm_sys.h>
 
 #define VI_IOC_MAGIC		'V'
 #define VI_IOC_BASE		0x20
@@ -79,6 +78,16 @@ enum VI_IOCTL {
 	VI_IOCTL_GET_IR_LE_PHY_BUF,
 	VI_IOCTL_GET_IR_SE_PHY_BUF,
 	VI_IOCTL_MAX,
+	VI_IOCTL_GET_V4L2_BUF_PHY_ADDR,
+	VI_IOCTL_GET_PIPE_ATTR,
+	VI_IOCTL_SET_PIPE_ATTR,
+	VI_IOCTL_SET_BYPASS_FRM,
+	VI_IOCTL_GET_CHN_FRAME,
+	VI_IOCTL_RELEASE_CHN_FRAME,
+	VI_IOCTL_GET_PIPE_FRAME,
+	VI_IOCTL_RELEASE_PIPE_FRAME,
+	VI_IOCTL_GET_PIPE_DUMP_ATTR,
+	VI_IOCTL_SET_PIPE_DUMP_ATTR,
 };
 
 enum VI_SDK_CTRL {
@@ -239,7 +248,6 @@ struct vi_chn_rot_cfg {
 struct vi_chn_ldc_cfg {
 	VI_PIPE ViPipe;
 	VI_CHN ViChn;
-	ROTATION_E enRotation;
 	VI_LDC_ATTR_S stLDCAttr;
 	CVI_U64 meshHandle;
 };

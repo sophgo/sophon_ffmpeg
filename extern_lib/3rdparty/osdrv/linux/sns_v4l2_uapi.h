@@ -1,0 +1,59 @@
+#ifndef __U_ISP_SENSOR_UAPI_H__
+#define __U_ISP_SENSOR_UAPI_H__
+
+#include <linux/types.h>
+#include "cvi_ae_comm.h"
+#include "cvi_sns_ctrl.h"
+#include "cvi_awb_comm.h"
+#include "cvi_comm_sns.h"
+
+#ifdef __cplusplus
+	extern "C" {
+#endif
+
+#define ISPV4L2_GET_SNS_AE_DEFAULT	\
+	_IOR('V', BASE_VIDIOC_PRIVATE + 1, struct _AE_SENSOR_DEFAULT_S)
+#define ISPV4L2_SNS_MIRROR_FLIP	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 2, __u8)
+#define ISPV4L2_TIME_UPDATE	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 3, CVI_U32[2])
+#define ISPV4L2_AGAIN_CALC_TABLE \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 4, CVI_U32[2])
+#define ISPV4L2_DGAIN_CALC_TABLE \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 5, CVI_U32[2])	
+#define ISPV4L2_GAINS_UPDATE \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 6, CVI_U32[2])
+#define ISPV4L2_GET_TIME_MAX \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 7, CVI_U32[5])
+#define ISPV4L2_AE_FSWDR_ATTR_SET	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 8, struct _AE_FSWDR_ATTR_S)
+#define ISPV4L2_GET_AWB_DEFAULT	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 9, struct cviAWB_SENSOR_DEFAULT_S)
+#define ISPV4L2_INIT_AWB_EXP_FUNC	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 10, struct cviAWB_SENSOR_EXP_FUNC_S)
+#define ISPV4L2_GET_ISP_DEFAULT	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 11, struct _ISP_CMOS_DEFAULT_S)
+#define ISPV4L2_GET_BLC_DEFAULT	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 12, struct _ISP_CMOS_BLACK_LEVEL_S)
+#define ISPV4L2_GET_WDR_SIZE	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 13, struct _ISP_SNS_ISP_INFO_S)
+#define ISPV4L2_SET_WDR_SIZE	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 14, CVI_U8)
+#define ISPV4L2_CMP_WDR_SIZE	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 15, struct _ISP_SNS_ISP_INFO_S [2])
+#define ISPV4L2_GET_SNS_REG_INFO	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 16, struct _ISP_SNS_SYNC_INFO_S)
+#define ISPV4L2_SNS_RX_ATTR	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 17, struct combo_dev_attr_s)
+#define ISPV4L2_PATCH_RX_ATTR	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 18, struct _RX_INIT_ATTR_S)
+#define ISPV4L2_SET_BUS_INFO	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 19, union _ISP_SNS_COMMBUS_U)
+#define ISPV4L2_SET_INIT	\
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 20, struct _ISP_INIT_ATTR_S)
+
+#ifdef __cplusplus
+	}
+#endif
+
+#endif /* __U_ISP_SENSOR_UAPI_H__ */

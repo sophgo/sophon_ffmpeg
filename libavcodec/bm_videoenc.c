@@ -137,6 +137,7 @@ typedef struct {
     double total_time; // ms
     long   total_frame;
     int    first_pkt_recevie_flag;  // 1: have recv first pkt
+    int    enc_cmd_queue; // venc command queue depth (1 ~ 4)
 } BmVpuEncContext;
 
 typedef union {
@@ -524,6 +525,8 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
         cbcr_interleave = 0;
     else if (sw_pix_fmt == AV_PIX_FMT_NV12)
         cbcr_interleave = 1;
+    else if (sw_pix_fmt == AV_PIX_FMT_NV21)
+        cbcr_interleave = 1;
     else {
         char buf[128];
         snprintf(buf, sizeof(buf), "%d", avctx->pix_fmt);
@@ -581,6 +584,7 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
     av_log(avctx, AV_LOG_DEBUG, "perf         : %d\n", ctx->perf);
     av_log(avctx, AV_LOG_DEBUG, "zero copy    : %s\n", ctx->zero_copy ? "Yes":"No");
     av_log(avctx, AV_LOG_DEBUG, "roi enable   : %d\n", ctx->roi_enable);
+    av_log(avctx, AV_LOG_DEBUG, "vecmd queue  : %d\n", ctx->enc_cmd_queue);
 
     if (avctx->codec_id == AV_CODEC_ID_H264)
         codec_fmt = BM_VPU_CODEC_FORMAT_H264;
@@ -605,10 +609,15 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
      * plane, otherwise they are separated in their own planes.
      * See the BmVpuColorFormat documentation for the consequences of this. */
     eop->chroma_interleave = cbcr_interleave;
-    if (cbcr_interleave == 0) {
+    if (sw_pix_fmt == AV_PIX_FMT_YUV420P) {
         eop->color_format = BM_VPU_COLOR_FORMAT_YUV420;
-    }else if (cbcr_interleave == 1) {
+    } else if (sw_pix_fmt == AV_PIX_FMT_NV12) {
         eop->color_format = BM_VPU_COLOR_FORMAT_NV12;
+    } else if (sw_pix_fmt == AV_PIX_FMT_NV21) {
+        eop->color_format = BM_VPU_COLOR_FORMAT_NV21;
+    } else {
+        av_log(avctx, AV_LOG_ERROR, "format(%d) is not support\n", sw_pix_fmt);
+        return AVERROR_UNKNOWN;
     }
 
     if (ctx->cqp >= 0) {
@@ -645,6 +654,7 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
     eop->gop_preset = ctx->gop_preset;
 
     eop->roi_enable = ctx->roi_enable;
+    eop->cmd_queue_depth = ctx->enc_cmd_queue;
 
     if (ctx->params_str) {
         AVDictionary    *dict = NULL;
@@ -685,6 +695,7 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
 
 
     ctx->num_src_fb = ctx->initial_info.min_num_src_fb;
+    avctx->delay = ctx->num_src_fb;
     if (ctx->zero_copy) {
 #ifndef BM_PCIE_MODE
         av_log(avctx, AV_LOG_WARNING, "Minimum number of input frame buffers"
@@ -715,6 +726,7 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
             ret = AVERROR(ENOMEM);
             goto cleanup;
         }
+        memset(ctx->src_fb_dmabuffers, 0, sizeof(bm_device_mem_t*) * ctx->num_src_fb);
 
         for (i = 0; i < ctx->num_src_fb; ++i) {
             int src_id = i;
@@ -723,6 +735,8 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
             ctx->src_fb_dmabuffers[i] = (bm_device_mem_t *)av_mallocz(sizeof(bm_device_mem_t));
             ret = bmvpu_malloc_device_byte_heap(ctx->handle, ctx->src_fb_dmabuffers[i], ctx->initial_info.src_fb.size, 0x06, 1);
             if (ret != BM_SUCCESS) {
+                av_free(ctx->src_fb_dmabuffers[i]);
+                ctx->src_fb_dmabuffers[i] = NULL;
                 av_log(avctx, AV_LOG_ERROR, "bmvpu_malloc_device_byte_heap failed! 675\n");
                 return AVERROR_EXTERNAL;
             }
@@ -770,6 +784,8 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
             ctx->roi_dmabuffers[i] = (bm_device_mem_t *)av_mallocz(sizeof(bm_device_mem_t));
             ret = bmvpu_malloc_device_byte_heap(ctx->handle, ctx->roi_dmabuffers[i], roi_size, HEAP_MASK_1_2,  1);
             if (ret != BM_SUCCESS) {
+                av_free(ctx->roi_dmabuffers[i]);
+                ctx->roi_dmabuffers[i] = NULL;
                 av_log(avctx, AV_LOG_ERROR, "bmvpu_malloc_device_byte_heap failed! 675\n");
                 return AVERROR_EXTERNAL;
             }
@@ -921,8 +937,11 @@ static av_cold int bm_videoenc_close(AVCodecContext *avctx)
     if (!ctx->zero_copy) {
         if (ctx->src_fb_dmabuffers) {
             for (i = 0; i < ctx->num_src_fb; ++i) {
-                bm_free_device(ctx->handle, *(ctx->src_fb_dmabuffers[i]));
-                av_free(ctx->src_fb_dmabuffers[i]);
+                if(ctx->src_fb_dmabuffers[i] != NULL) {
+                    bm_free_device(ctx->handle, *(ctx->src_fb_dmabuffers[i]));
+                    av_free(ctx->src_fb_dmabuffers[i]);
+                    ctx->src_fb_dmabuffers[i] = NULL;
+                }
             }
             av_free(ctx->src_fb_dmabuffers);
             ctx->src_fb_dmabuffers = NULL;
@@ -936,8 +955,11 @@ static av_cold int bm_videoenc_close(AVCodecContext *avctx)
     /*--> release roi*/
     if (ctx->roi_dmabuffers) {
         for (i = 0; i < ctx->num_roi; ++i) {
-            bm_free_device(ctx->handle, *(ctx->roi_dmabuffers[i]));
-            av_free(ctx->roi_dmabuffers[i]);
+            if(ctx->roi_dmabuffers[i] != NULL) {
+                bm_free_device(ctx->handle, *(ctx->roi_dmabuffers[i]));
+                av_free(ctx->roi_dmabuffers[i]);
+                ctx->roi_dmabuffers[i] = NULL;
+            }
         }
         av_free(ctx->roi_dmabuffers);
         ctx->roi_dmabuffers = NULL;
@@ -1171,7 +1193,7 @@ static int bm_videoenc_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
             sw_format = frame->format;
         }
 
-        if (sw_format != AV_PIX_FMT_YUV420P && sw_format != AV_PIX_FMT_NV12) {
+        if (sw_format != AV_PIX_FMT_YUV420P && sw_format != AV_PIX_FMT_NV12 && sw_format != AV_PIX_FMT_NV21) {
             snprintf(buf, sizeof(buf), "%d", sw_format);
             av_log(avctx, AV_LOG_ERROR,
                    "B. Specified pixel format %s is not supported\n",
@@ -1239,7 +1261,7 @@ static int bm_videoenc_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
             }
 
             y_size = pic->data[1] - pic->data[0];
-            if (sw_format == AV_PIX_FMT_NV12) {
+            if (sw_format == AV_PIX_FMT_NV12 || sw_format == AV_PIX_FMT_NV21) {
                 c_size = y_size/2; // TODO
                 total_size = y_size + c_size;
             } else {
@@ -1571,8 +1593,9 @@ static const AVOption options[] = {
         "\t\t\t\t\t\t5 - IBBBP, cyclic gopsize 4;\n"
         "\t\t\t\t\t\t6 - IPPPP, cyclic gopsize 4;\n"
         "\t\t\t\t\t\t7 - IBBBB, cyclic gopsize 4;\n"
-        "\t\t\t\t\t\t8 - random access, IBBBBBBBB, cyclic gopsize 8",
-        OFFSET(gop_preset), AV_OPT_TYPE_INT, {.i64=2}, 1, 8, FLAGS },
+        "\t\t\t\t\t\t8 - random access, IBBBBBBBB, cyclic gopsize 8;\n"
+        "\t\t\t\t\t\t9 - IPP,   cyclic gopsize 1;",
+        OFFSET(gop_preset), AV_OPT_TYPE_INT, {.i64=2}, 1, 9, FLAGS },
 #ifdef BM_PCIE_MODE
     { "sophon_idx", "Sophon device index when running in pcie mode.",
         OFFSET(soc_idx), AV_OPT_TYPE_INT, {.i64 = 0}, INT_MIN, INT_MAX, FLAGS },
@@ -1585,6 +1608,8 @@ static const AVOption options[] = {
         OFFSET(perf), AV_OPT_TYPE_FLAGS, {.i64 = 0}, 0, 1, FLAGS },
     { "roi_enable", "roi enable: 0 disable roi encoding; 1 use roi encoding.  default 0.",
         OFFSET(roi_enable), AV_OPT_TYPE_INT, {.i64=0}, 0, 1, FLAGS },
+    { "enc_cmd_queue", "vpu enc command queue depth",
+        OFFSET(enc_cmd_queue), AV_OPT_TYPE_INT, { .i64 = 4 }, 1, 16, FLAGS }, // TODO
     { NULL},
 };
 
@@ -1629,6 +1654,7 @@ const FFCodec ff_h264_bm_encoder = {
         AV_PIX_FMT_BMCODEC,
         AV_PIX_FMT_YUV420P,
         AV_PIX_FMT_NV12,
+        AV_PIX_FMT_NV21,
         AV_PIX_FMT_NONE
     }
 };
@@ -1659,6 +1685,7 @@ const FFCodec ff_h265_bm_encoder = {
         AV_PIX_FMT_BMCODEC,
         AV_PIX_FMT_YUV420P,
         AV_PIX_FMT_NV12,
+        AV_PIX_FMT_NV21,
         AV_PIX_FMT_NONE
     },
     .p.wrapper_name   = "bm"
@@ -1688,6 +1715,7 @@ const FFCodec ff_hevc_bm_encoder = {
         AV_PIX_FMT_BMCODEC,
         AV_PIX_FMT_YUV420P,
         AV_PIX_FMT_NV12,
+        AV_PIX_FMT_NV21,
         AV_PIX_FMT_NONE
     },
     .p.wrapper_name   = "bm"

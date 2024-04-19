@@ -16,10 +16,10 @@ extern "C" {
 #endif
 #endif /* __cplusplus */
 
-#define CVI_CHIP_NAME "ATHENA2"
+#define CVI_CHIP_NAME "BM1688"
 
-#ifndef __ATHENA2__
-#define __ATHENA2__
+#ifndef __BM1688__
+#define __BM1688__
 #endif
 
 #define CVI_CHIP_TEST  0x0
@@ -62,7 +62,7 @@ enum ENUM_CHIP_ID {
 	E_CHIPID_CV1801B,		//23
 	E_CHIPID_CV1800C,		//24
 	E_CHIPID_CV1801C,		//25
-// athena2 chips
+// bm1688 chips
 	E_CHIPID_BM1686,		//26
 	E_CHIPID_CV186AH,		//27
 	E_CHIPID_UNKOWN = 0xFFFFFFFF,   //0xFFFFFFFF
@@ -349,6 +349,7 @@ enum ENUM_CHIP_ID {
 #define VO_MAX_GRAPHICS_LAYER_NUM   1
 #define VO_MIN_TOLERATE         1       /* min play toleration 1ms */
 #define VO_MAX_TOLERATE         100000  /* max play toleration 100s */
+#define VO_HDMI_DEVICE          1       /* only device 1 has hdmi interface */
 
 /* For AUDIO */
 #define AI_DEV_MAX_NUM          1
@@ -370,7 +371,7 @@ enum ENUM_CHIP_ID {
 #define VPSS_D_IP_NUM            2
 #define VPSS_IP_NUM              (VPSS_V_IP_NUM + VPSS_T_IP_NUM + VPSS_D_IP_NUM)
 #define VPSS_MAX_GRP_NUM         64
-#define VPSS_ONLINE_NUM          2
+#define VPSS_ONLINE_NUM          8
 #define VPSS_ONLINE_GRP_0        0
 #define VPSS_ONLINE_GRP_1        1
 #define VPSS_MAX_PHY_CHN_NUM     4
@@ -408,12 +409,12 @@ enum ENUM_CHIP_ID {
 #define DPU_MIN_IMAGE_HEIGHT        64
 #define DPU_MAX_IMAGE_WIDTH         1920
 #define DPU_MAX_IMAGE_HEIGHT        1080
-#define DPU_WAITQ_DEPTH_IN        	20
+#define DPU_WAITQ_DEPTH_IN        	2
 #define DPU_WORKQ_DEPTH_IN        	1
 #define DPU_DONEQ_DEPTH_IN        	1
 #define DPU_WAITQ_DEPTH_OUT        	1
 #define DPU_WORKQ_DEPTH_OUT        	1
-#define DPU_DONEQ_DEPTH_OUT        	5
+#define DPU_DONEQ_DEPTH_OUT        	2
 
 /* For STITCH*/
 #define STITCH_MAX_SRC_NUM         4

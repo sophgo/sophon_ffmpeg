@@ -381,6 +381,11 @@ typedef struct
     /* roi encoding flag
      * Default value is 0 */
     int roi_enable;
+
+    /* set cmd queue depath
+     * Default value is 4
+     * the value must 1 <= value <= 4*/
+    int cmd_queue_depth;
 } BmVpuEncOpenParams;
 
 /* Initial encoding information, produced by the encoder. This structure is

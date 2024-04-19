@@ -58,6 +58,7 @@ typedef struct {
     int                 skip_mode;                  //2 only decode I frames.
     int                 perf;
     int                 core_idx;
+    int                 cmd_queue_depth;
     int                 reserved[13];
 } BMVidDecParam;
 

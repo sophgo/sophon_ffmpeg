@@ -265,7 +265,7 @@ typedef struct _RGN_RECT_ATTR_S {
 
 typedef struct _RGN_BITMAP_ATTR_S {
 	RECT_S stRect;
-	CVI_U32 u32BitmapPAddr;
+	CVI_U64 u64BitmapPAddr;
 } RGN_BITMAP_ATTR_S;
 
 typedef struct _RGN_CMPR_OBJ_ATTR_S {

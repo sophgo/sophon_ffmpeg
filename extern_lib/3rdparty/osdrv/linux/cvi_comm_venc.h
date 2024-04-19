@@ -83,6 +83,8 @@ typedef enum {
 	CVI_ERR_VENC_H265_SPLIT,
 	CVI_ERR_VENC_H264_INTRA_PRED,
 	CVI_ERR_VENC_H265_SAO,
+	CVI_ERR_VENC_H265_PRED_UNIT,
+	CVI_ERR_VENC_SEARCH_WINDOW,
 	CVI_ERR_VENC_BUTT
 } VENC_RECODE_E_ERRTYPE;
 
@@ -464,6 +466,15 @@ typedef enum _VENC_GOP_PRESET_S {
 } VENC_GOP_PRESET_S;
 
 /**
+ * @brief   This is a enumeration type for defining encode mode.
+ */
+typedef enum _VENC_ENCODE_MODE {
+    VENC_MODE_RECOMMEND = 1,
+    VENC_MODE_BOOST     = 2,
+    VENC_MODE_FAST      = 3,
+} VENC_ENCODE_MODE;
+
+/**
 * @brief    This is a data structure for custom GOP parameters of the given picture.
 */
 typedef struct _VENC_CUSTOM_GOP_PIC_PARAM {
@@ -515,6 +526,7 @@ typedef struct _VENC_ATTR_S {
 	ROTATION_E enRotation;      ///< rotate angle option, (0 ~ 3)
 	MIRROR_TYPE_E enMirrorDirextion; ///< representing the mirroring direction, (0 ~ 3)
 	CVI_U32 u32CmdQueueDepth;   ///< venc command queue depth (1 ~ 4)(for h264/h265)
+	VENC_ENCODE_MODE enEncMode; ///< venc encode mode (1 ~ 3)
 	union {
 		VENC_ATTR_H264_S stAttrH264e;	///< TODO VENC
 		VENC_ATTR_H265_S stAttrH265e;	///< TODO VENC
@@ -1110,6 +1122,19 @@ typedef struct _VENC_ENCODE_HEADER_S {
 	CVI_U8  headerRbsp[256]; /* R; the virtual address of stream */
 	CVI_U32 u32Len; /* R; the length of stream */
 } VENC_ENCODE_HEADER_S;
+
+typedef enum _VENC_SEARCH_MODE_E {
+    SEARCH_MODE_AUTO   = 0,
+    SEARCH_MODE_MANUAL = 1,
+    SEARCH_MODE_BUTT
+} VENC_SEARCH_MODE_E;
+
+typedef struct _VENC_SEARCH_WINDOW_S {
+    VENC_SEARCH_MODE_E mode;
+    CVI_U32 u32Hor;
+    CVI_U32 u32Ver;
+} VENC_SEARCH_WINDOW_S;
+
 
 #ifdef __cplusplus
 #if __cplusplus

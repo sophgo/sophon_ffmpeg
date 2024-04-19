@@ -331,11 +331,15 @@ static enum AVPixelFormat bm_format_to_av_pixel_format(AVCodecContext *avctx, BM
         if(bmframe->cbcrInterleave == 1) {
             if(bmframe->nv21 == 0)
                 fmt = AV_PIX_FMT_NV12;
-            else
+            else if(bmframe->nv21 == 1)
                 fmt = AV_PIX_FMT_NV21;
+            else
+                fmt = AV_PIX_FMT_NONE;
         }
-        else
+        else if(bmframe->cbcrInterleave == 0)
             fmt = AV_PIX_FMT_YUV420P;
+        else
+            fmt = AV_PIX_FMT_NONE;
         break;
     case 1:
         fmt = AV_PIX_FMT_NV12;
@@ -359,14 +363,7 @@ static enum AVPixelFormat bm_format_to_av_pixel_format(AVCodecContext *avctx, BM
             fmt = AV_PIX_FMT_YUV420P16LE;
         break;
     default:
-        if(bmframe->cbcrInterleave == 1) {
-            if(bmframe->nv21 == 0)
-                fmt = AV_PIX_FMT_NV12;
-            else
-                fmt = AV_PIX_FMT_NV21;
-        }
-        else
-            fmt = AV_PIX_FMT_YUV420P;
+        fmt = AV_PIX_FMT_NONE;
         break;
     }
 
@@ -530,6 +527,7 @@ static av_cold int bm_decode_init(AVCodecContext *avctx)
     param.skip_mode = bmctx->skip_non_idr;
     param.perf = bmctx->perf;
     param.core_idx = bmctx->core_idx;
+    param.cmd_queue_depth = bmctx->dec_cmd_queue;
 
     ret = bmvpu_dec_create(&handle, param);
     if (ret != 0) {
@@ -542,6 +540,7 @@ static av_cold int bm_decode_init(AVCodecContext *avctx)
     bmctx->first_frame = 0;
     bmctx->pkt_flag = 0;
     bmctx->first_frame_get = 0;
+    bmctx->pts_offset = 0;
 
     BMHandleBuffer *bm_handle_buffer = (BMHandleBuffer*)av_mallocz(sizeof(BMHandleBuffer));
     ff_mutex_init(&(bm_handle_buffer->av_mutex), NULL);
@@ -1486,7 +1485,12 @@ GET_FRAME:
     if(get_frame_state == BM_SUCCESS) {
         if(bmctx->first_frame_get == 0) {
             bmctx->first_frame_get = 1;
+            int dts = bmframe->dts;
+            if(dts < 0) {
+                bmctx->pts_offset = 0 - dts;
+            }
         }
+        bmframe->pts = bmframe->dts + bmctx->pts_offset;
         overtime_cnt = 0;
         get_frame = 1;
     }
@@ -1511,12 +1515,8 @@ GET_FRAME:
             if(ret < 0) {
                 av_log(avctx, AV_LOG_ERROR, "maybe meet a error. didn't get frame.\n");
             }
-            if(bmctx->first_frame_get == 0) {
-                free(bmframe);
-                return ret;
-            }
-            else
-                goto GET_FRAME;
+            free(bmframe);
+            return ret;
         }
         else {
             usleep(1000);
@@ -1524,6 +1524,8 @@ GET_FRAME:
             if(overtime_cnt == 10000){
                 av_log(avctx, AV_LOG_ERROR, "maybe meet a error. didn't get frame. free input buffer:%d\n", bmvpu_dec_get_all_empty_input_buf_cnt(handle));
                 overtime_cnt = 0;
+                if(bmvpu_dec_get_status(handle) == BMDEC_STOP)
+                    return AVERROR_EXTERNAL;
             }
             if (bmvpu_dec_get_all_empty_input_buf_cnt(handle) > 0)
                 goto SEND_PKG;
@@ -1721,7 +1723,7 @@ static const AVOption options[] = {
     { "cbcr_interleave", "cbcr interleave of output frame in the bitmain decoder context",
         OFFSET(cbcr_interleave), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 2, FLAGS },
     { "extra_frame_buffer_num", "number of extra frame buffer in the bitmain decoder context",
-        OFFSET(extra_frame_buffer_num), AV_OPT_TYPE_INT, {.i64 = 7}, 1, INT_MAX, FLAGS },
+        OFFSET(extra_frame_buffer_num), AV_OPT_TYPE_INT, {.i64 = 7}, 0, INT_MAX, FLAGS },
     { "extra_data_flag", "process extra data flag of avpkt in the bitmain decoder context",
         OFFSET(extra_data_flag), AV_OPT_TYPE_INT, {.i64 = 1}, 0, INT_MAX, FLAGS },
     { "frame_delay", "return a display frame after frame_delay frames decoding in the bitmain decoder context",
@@ -1748,7 +1750,9 @@ static const AVOption options[] = {
     { "core_idx", "Specify a decoding core in a soc to decode. 1684 max = 3, 1684x max = 1",
         OFFSET(core_idx), AV_OPT_TYPE_INT, {.i64 = -1}, -1, 3, FLAGS },
     {"size_input_buffer","input buffer size of video decoder bitstream (0x200000, 0x700000)",
-        OFFSET(size_input_buffer),AV_OPT_TYPE_INT,{.i64=0x400000} ,0X200000,0X700000,FLAGS },
+        OFFSET(size_input_buffer), AV_OPT_TYPE_INT, {.i64 = 0x400000} , 0X200000, 0X700000, FLAGS },
+    {"cmd_queue","decoder command queue depth",
+        OFFSET(dec_cmd_queue), AV_OPT_TYPE_INT, {.i64 = 4} , 1, 4, FLAGS },
     { NULL},
 };
 
