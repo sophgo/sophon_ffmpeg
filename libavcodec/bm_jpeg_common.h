@@ -22,6 +22,8 @@
 #ifndef _BM_JPEG_COMMON_H_
 #define _BM_JPEG_COMMON_H_
 
+#include "bm_jpeg_interface.h"
+
 static void logging_func(BmJpuLogLevel level, char const *file, int const line, char const *fn, const char *format, ...)
 {
     va_list args;

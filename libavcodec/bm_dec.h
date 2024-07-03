@@ -42,17 +42,16 @@ typedef struct{
 #ifndef BMVIDFRAME
 #define BMVIDFRAME
 typedef struct _BMVidFrame {
-    int picType;
+    BmVpuDecPicType picType;
+    BmVpuDecLaceFrame           interlacedFrame;
+    BmVpuDecFrameBufferFormat   frameFormat;
     unsigned char* buf[8]; /**< 0: Y virt addr, 1: Cb virt addr: 2, Cr virt addr. 4: Y phy addr, 5: Cb phy addr, 6: Cr phy addr */
     int stride[8];
     unsigned int width;
     unsigned int height;
-    int frameFormat;
-    int interlacedFrame;
     int lumaBitDepth;   /**< Bit depth for luma component */
     int chromaBitDepth; /**< Bit depth for chroma component  */
-    int cbcrInterleave;
-    int nv21;
+    BmVpuDecPixFormat pixel_format;
     int endian;
     int sequenceNo;  /**< This variable increases by 1 whenever sequence changes (WAVE only) */
     int frameIdx;
