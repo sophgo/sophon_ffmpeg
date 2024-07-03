@@ -1,114 +1,46 @@
-SOPHGO FFMpeg README
-====================
+FFmpeg README
+=============
 
-This is SOPHGO FFMpeg project optimized for SOPHGO BM1682/1684/1684x AI chips. It provides hardware accelerations for video codecs 
-and image processing filters. Also some enhancement for streaming protocal are included. 
+FFmpeg is a collection of libraries and tools to process multimedia content
+such as audio, video, subtitles and related metadata.
 
-## Changes
-With officical FFMpeg, following changes are done in this project. 
+## Libraries
 
-** h264_bm, hevc_bm, jpeg_bm codecs are implemented using video hardware engine in SOPHGO Chips for h264/hevc/jpeg decoder or encoder
+* `libavcodec` provides implementation of a wider range of codecs.
+* `libavformat` implements streaming protocols, container formats and basic I/O access.
+* `libavutil` includes hashers, decompressors and miscellaneous utility functions.
+* `libavfilter` provides a mean to alter decoded Audio and Video through chain of filters.
+* `libavdevice` provides an abstraction to access capture and playback devices.
+* `libswresample` implements audio mixing and resampling routines.
+* `libswscale` implements color conversion and scaling routines.
 
-** bmscale is implemented using image processing hardware in SOPHGO Chips for image processing
+## Tools
 
-** GB2818 streaming protocal support is added in FFMpeg
+* [ffmpeg](https://ffmpeg.org/ffmpeg.html) is a command line toolbox to
+  manipulate, convert and stream multimedia content.
+* [ffplay](https://ffmpeg.org/ffplay.html) is a minimalistic multimedia player.
+* [ffprobe](https://ffmpeg.org/ffprobe.html) is a simple analysis tool to inspect
+  multimedia content.
+* Additional small tools such as `aviocat`, `ismindex` and `qt-faststart`.
 
-** Several domenstic CPUs are supported
+## Documentation
 
-** Many improvements are customized for Chinese market
+The offline documentation is available in the **doc/** directory.
 
-## Build Command
+The online documentation is available in the main [website](https://ffmpeg.org)
+and in the [wiki](https://trac.ffmpeg.org).
 
-### x86_64 linux with local gcc
-    1. export PKG_CONFIG_PATH=./extern_lib/prebuilt/x86_64/lib/pkgconfig:$PKG_CONFIG_PATH
-    2. configure
-    ./configure --target-os=linux \
-        --pkg-config=pkg-config \
-        --optflags=" "  \
-        --enable-libmp3lame \
-        --enable-static --enable-shared --enable-pic \
-        --enable-swscale --enable-libfreetype \
-        --enable-bmcodec --disable-encoder=bmx264  \
-        --enable-encoder=jpeg_bm --enable-decoder=jpeg_bm \
-        --disable-decoder=vc1_bm --disable-decoder=wmv1_bm --disable-decoder=wmv2_bm \
-        --disable-decoder=wmv3_bm --disable-decoder=mpeg1_bm --disable-decoder=mpeg2_bm --disable-decoder=mpeg4_bm  --disable-decoder=mpeg4v3_bm --disable-decoder=flv1_bm \
-        --disable-decoder=h263_bm --disable-decoder=cavs_bm --disable-decoder=avs_bm --disable-decoder=vp3_bm --disable-decoder=vp8_bm --enable-openssl \
-        --disable-decoder=h264_v4l2m2m  \
-        --disable-vaapi --disable-hwaccel=h263_vaapi  --disable-hwaccel=h264_vaapi --disable-hwaccel=hevc_vaapi --disable-hwaccel=mjpeg_vaapi \
-        --disable-hwaccel=mpeg2_vaapi --disable-hwaccel=mpeg4_vaapi --disable-hwaccel=vc1_vaapi --disable-hwaccel=vp8_vaapi \
-        --disable-hwaccel=vp8_vaapi --disable-hwaccel=wmv3_vaapi \
-        --extra-ldflags="-L./extern_lib/bm_hardware_accele/decode_x86_64/lib -L./extern_lib/3rdparty/libbmcv/lib/pcie -Wl,-rpath=./extern_lib/3rdparty/libbmcv/lib/pcie -L./extern_lib/prebuilt/x86_64/lib -Wl,-rpath=./extern_lib/prebuilt/x86_64/lib" \
-        --extra-libs="-lm -lbmion -lbmvpulite -lbmvpuapi -lbmvppapi -lbmlib -lbmcv -lbmjpulite -lbmjpuapi -lbmvideo -lrt -lssl -lcrypto -ldl -lresolv -lstdc++ -lgb28181_sip" \
-        --extra-cflags="-DBM1684 -I./extern_lib/3rdparty/libbmcv/include -DBM_PCIE_MODE=1 -I./extern_lib/bm_hardware_accele/decode_x86_64/include/ -I./extern_lib/prebuilt/include/freetype2 -I./extern_lib/prebuilt/include/ -I./extern_lib/prebuilt/include/gbclient"
-    3. make and install to DESTDIR
+### Examples
 
-### x86_64 linux with x86_64-linux-gcc 5.4.0
-    1. download toolchain 
-        wget https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64-core-i7/tarballs/x86-64-core-i7--glibc--stable-2017.05-toolchains-1-1.tar.bz2
-    2. export PKG_CONFIG_PATH=./extern_lib/prebuilt/x86_64/lib/pkgconfig:$PKG_CONFIG_PATH
-    3. configure
-    ./configure --cross-prefix=x86_64-linux- --enable-cross-compile --target-os=linux --arch=x86_64 \
-        --pkg-config=pkg-config \
-        --optflags=" "  \
-        --enable-libmp3lame \
-        --enable-static --enable-shared --enable-pic \
-        --enable-swscale --enable-libfreetype \
-        --enable-bmcodec --disable-encoder=bmx264  \
-        --enable-encoder=jpeg_bm --enable-decoder=jpeg_bm \
-        --disable-decoder=vc1_bm --disable-decoder=wmv1_bm --disable-decoder=wmv2_bm \
-        --disable-decoder=wmv3_bm --disable-decoder=mpeg1_bm --disable-decoder=mpeg2_bm --disable-decoder=mpeg4_bm  --disable-decoder=mpeg4v3_bm --disable-decoder=flv1_bm \
-        --disable-decoder=h263_bm --disable-decoder=cavs_bm --disable-decoder=avs_bm --disable-decoder=vp3_bm --disable-decoder=vp8_bm --enable-openssl \
-        --disable-decoder=h264_v4l2m2m  \
-        --disable-vaapi --disable-hwaccel=h263_vaapi  --disable-hwaccel=h264_vaapi --disable-hwaccel=hevc_vaapi --disable-hwaccel=mjpeg_vaapi \
-        --disable-hwaccel=mpeg2_vaapi --disable-hwaccel=mpeg4_vaapi --disable-hwaccel=vc1_vaapi --disable-hwaccel=vp8_vaapi \
-        --disable-hwaccel=vp8_vaapi --disable-hwaccel=wmv3_vaapi \
-        --extra-ldflags="-L./extern_lib/bm_hardware_accele/decode_x86_64/lib -L./extern_lib/3rdparty/libbmcv/lib/pcie -Wl,-rpath=./extern_lib/3rdparty/libbmcv/lib/pcie -L./extern_lib/prebuilt/x86_64/lib -Wl,-rpath=./extern_lib/prebuilt/x86_64/lib" \
-        --extra-libs="-lm -lbmion -lbmvpulite -lbmvpuapi -lbmvppapi -lbmlib -lbmcv -lbmjpulite -lbmjpuapi -lbmvideo -lrt -lssl -lcrypto -ldl -lresolv -lstdc++ -lgb28181_sip" \
-        --extra-cflags="-DBM1684 -I./extern_lib/3rdparty/libbmcv/include -DBM_PCIE_MODE=1 -I./extern_lib/bm_hardware_accele/decode_x86_64/include/ -I./extern_lib/prebuilt/include/freetype2 -I./extern_lib/prebuilt/include/ -I./extern_lib/prebuilt/include/gbclient"
-    4. make and install to DESTDIR
-	
-### SOPHGO soc with aarch64-linux-gnu-gcc
-    1. download toolchain from linaro gnu toolchain
-        wget https://releases.linaro.org/components/toolchain/gcc-linaro/6.3-2017.05/gcc-linaro-6.3-2017.05.tar.xz
-    2. export PKG_CONFIG_PATH=./extern_lib/prebuilt/lib/pkgconfig:$PKG_CONFIG_PATH
-    3. configure
-	./configure --enable-cross-compile --cross-prefix=aarch64-linux-gnu- --target-os=linux --arch=aarch64 \
-        --pkg-config=pkg-config \
-        --optflags=" "  \
-        --enable-static --enable-shared --enable-pic \
-        --enable-swscale --enable-libfreetype \
-        --enable-libmp3lame \
-        --enable-bmcodec --disable-encoder=bmx264  \
-        --disable-sdl2 --disable-ffplay \
-        --enable-encoder=jpeg_bm --enable-decoder=jpeg_bm \
-        --disable-decoder=vc1_bm --disable-decoder=wmv1_bm --disable-decoder=wmv2_bm \
-        --disable-decoder=wmv3_bm --disable-decoder=mpeg1_bm --disable-decoder=mpeg2_bm --disable-decoder=mpeg4_bm  --disable-decoder=mpeg4v3_bm --disable-decoder=flv1_bm \
-        --disable-decoder=h263_bm --disable-decoder=cavs_bm --disable-decoder=avs_bm --disable-decoder=vp3_bm --disable-decoder=vp8_bm --enable-openssl \
-        --disable-decoder=h264_v4l2m2m  \
-        --disable-vaapi --disable-hwaccel=h263_vaapi  --disable-hwaccel=h264_vaapi --disable-hwaccel=hevc_vaapi --disable-hwaccel=mjpeg_vaapi \
-        --disable-hwaccel=mpeg2_vaapi --disable-hwaccel=mpeg4_vaapi --disable-hwaccel=vc1_vaapi --disable-hwaccel=vp8_vaapi \
-        --disable-hwaccel=vp8_vaapi --disable-hwaccel=wmv3_vaapi \
-        --extra-ldflags="-L./extern_lib/bm_hardware_accele/decode_arm64/lib -L./extern_lib/prebuilt/lib -Wl,-rpath=./extern_lib/bm_hardware_accele/decode_arm64/lib:./extern_lib/prebuilt/lib"\
-        --extra-libs="-lm -lbmion -lbmvpulite -lbmvpuapi -lbmvppapi -lbmjpulite -lbmcv -lbmlib -lbmjpuapi -lbmvideo -lrt -lssl -lcrypto -ldl -lresolv -lstdc++ -lgb28181_sip" \
-        --extra-cflags="-DBM1684 -I./extern_lib/3rdparty/libbmcv/include -I./extern_lib/bm_hardware_accele/decode_arm64/include/ -I./extern_lib/prebuilt/include/freetype2 -I./extern_lib/prebuilt/include/ -I./extern_lib/prebuilt/include/gbclient"
-    4. make and install to DESTDIR
-	
+Coding examples are available in the **doc/examples** directory.
+
 ## License
 
-This project is licensed under the LGPL License, Version 3. Please refere to the LICNESE file for detailed information. 
+FFmpeg codebase is mainly LGPL-licensed with optional components licensed under
+GPL. Please refer to the LICENSE file for detailed information.
 
-## Authorts
-
-    - xun.li  
-    - tao.han
-    - yujing.shen
-    - huaishan.yuan
-    - yuyuan.yang
-    - xin.guo
-    - yu.yang
-    - mingxi.shen
-    - haotian.luo
-	
 ## Contributing
 
-This project is maintained by Sophgo multimedia team. Welcome to submit codes and patches to us by email to yujing.shen@sophgo.com
+Patches should be submitted to the ffmpeg-devel mailing list using
+`git format-patch` or `git send-email`. Github pull requests should be
+avoided because they are not part of our review process and will be ignored.

@@ -44,7 +44,6 @@
 #endif
 #include "internal.h"
 
-#include "bmjpuapi_jpeg.h"
 #include "bm_jpeg_common.h"
 #include "bmlib_runtime.h"
 
@@ -174,7 +173,7 @@ static av_cold int bm_jpegenc_init(AVCodecContext *avctx)
         return AVERROR_INVALIDDATA;
     }
 
-    bm_jpu_jpeg_enc_open(&(ctx->jpeg_encoder), bs_buffer_size, ctx->soc_idx);
+    bm_jpu_jpeg_enc_open(&(ctx->jpeg_encoder), 0, bs_buffer_size, ctx->soc_idx);
     if (ret != BM_JPU_ENC_RETURN_CODE_OK) {
         av_log(avctx, AV_LOG_ERROR, "bm_jpu_jpeg_enc_open failed!\n");
         return AVERROR_INVALIDDATA;
@@ -234,8 +233,7 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
     BmJpuJPEGEncParams enc_params;
     BmJpuFramebuffer framebuffer;
     bm_device_mem_t wrapped_mem;
-    int chroma_interleave = 0;
-    BmJpuColorFormat out_color_format = BM_JPU_COLOR_FORMAT_YUV420;
+    BmJpuImageFormat out_image_format = BM_JPU_IMAGE_FORMAT_YUV420P;
     BmJpuEncReturnCodes enc_ret;
     bs_buffer_t bs_buffer;
     void *acquired_handle;
@@ -302,11 +300,11 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
     }
 
     if (format == AV_PIX_FMT_YUVJ420P) {
-        out_color_format = BM_JPU_COLOR_FORMAT_YUV420;
+        out_image_format = BM_JPU_IMAGE_FORMAT_YUV420P;
     } else if (format == AV_PIX_FMT_YUVJ422P) {
-        out_color_format = BM_JPU_COLOR_FORMAT_YUV422_HORIZONTAL;
+        out_image_format = BM_JPU_IMAGE_FORMAT_YUV422P;
     } else if (format == AV_PIX_FMT_YUVJ444P) {
-        out_color_format = BM_JPU_COLOR_FORMAT_YUV444;
+        out_image_format = BM_JPU_IMAGE_FORMAT_YUV444P;
     } else if (format == AV_PIX_FMT_GRAY8) {
         if (frame->color_range == AVCOL_RANGE_MPEG) {
             av_log(avctx, AV_LOG_ERROR,
@@ -318,7 +316,7 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
                    "For gray pixel format, the input color range is (%s). Encode it as full color range.\n",
                    av_color_range_name(frame->color_range));
         }
-        out_color_format = BM_JPU_COLOR_FORMAT_YUV400;
+        out_image_format = BM_JPU_IMAGE_FORMAT_GRAY;
     } else {
         snprintf(buf, sizeof(buf), "%d", format);
         av_log(avctx, AV_LOG_ERROR,
@@ -368,6 +366,7 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
         if (format != AV_PIX_FMT_GRAY8)
             total_size += c_size*2;
 
+        wrapped_mem.flags.u.mem_type = BM_MEM_TYPE_DEVICE;
         wrapped_mem.u.device.device_addr = (unsigned long long)frame->data[0];
         wrapped_mem.u.device.dmabuf_fd = 1;
         wrapped_mem.size = total_size;
@@ -392,10 +391,9 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
         BmJpuFramebufferSizes calculated_sizes;
 
         /* Initialize the input framebuffer */
-        ret = bm_jpu_calc_framebuffer_sizes(out_color_format,
-                                      width, height,
+        ret = bm_jpu_calc_framebuffer_sizes(width, height,
                                       FRAMEBUFFER_ALIGNMENT,
-                                      chroma_interleave,
+                                      out_image_format,
                                       &calculated_sizes);
         if (ret != BM_JPU_ENC_RETURN_CODE_OK) {
             av_log(avctx, AV_LOG_ERROR,
@@ -407,7 +405,7 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
         av_log(avctx, AV_LOG_DEBUG, "\theight=%d\n", height);
         av_log(avctx, AV_LOG_DEBUG, "calculated_sizes:\n");
         av_log(avctx, AV_LOG_DEBUG,
-               "\tchroma_interleave=%d\n", calculated_sizes.chroma_interleave);
+               "\timage_format=%d\n", calculated_sizes.image_format);
         av_log(avctx, AV_LOG_DEBUG,
                "\taligned_frame_width =%d\n", calculated_sizes.aligned_frame_width);
         av_log(avctx, AV_LOG_DEBUG,
@@ -446,7 +444,7 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
             return AVERROR(ENOMEM);
         }
 #else
-        ret = bm_mem_mmap_device_mem(ctx->handle, framebuffer.dma_buffer, &p_virt_addr);
+        ret = bm_mem_mmap_device_mem(ctx->handle, framebuffer.dma_buffer, (unsigned long long *)&p_virt_addr);
         if (ret != BM_SUCCESS) {
             av_log(avctx, AV_LOG_ERROR,
                    "bm_mem_mmap_device_mem failed!\n");
@@ -557,7 +555,7 @@ static int bm_jpegenc_encode_frame(AVCodecContext *avctx,
     enc_params.frame_width    = width;
     enc_params.frame_height   = height;
     enc_params.quality_factor = ctx->quality;
-    enc_params.color_format   = out_color_format;
+    enc_params.image_format   = out_image_format;
     enc_params.acquire_output_buffer = acquire_output_buffer;
     enc_params.finish_output_buffer  = finish_output_buffer;
     enc_params.output_buffer_context = (void*)(&bs_buffer);

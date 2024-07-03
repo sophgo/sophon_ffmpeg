@@ -47,8 +47,6 @@
 #endif
 #include "internal.h"
 
-#include "bmjpuapi.h"
-#include "bmjpuapi_jpeg.h"
 #include "bm_jpeg_common.h"
 #include "bmlib_runtime.h"
 
@@ -272,7 +270,7 @@ static int bm_jpegdec_fill_frame(AVCodecContext *avctx,
 #if defined(BM1684)
         AVBmCodecFrame* hwpic = av_mallocz(sizeof(AVBmCodecFrame));
         if (hwpic == NULL) {
-            av_log(avctx, AV_LOG_ERROR, "av_mallocz failed\n");
+            av_log(avctx, AV_LOG_ERROR, "av_mallocz failed.\n");
             return AVERROR(ENOMEM);
         }
 
@@ -433,7 +431,7 @@ static av_cold int bm_jpegdec_init(AVCodecContext *avctx)
 
     bmjpu_setup_logging();
 
-    bmjpu_setup_heap_allocator_functions();
+    // bmjpu_setup_heap_allocator_functions();
 
     ret = bm_jpu_dec_load(ctx->soc_idx);
     if (ret != BM_JPU_DEC_RETURN_CODE_OK) {
@@ -442,10 +440,12 @@ static av_cold int bm_jpegdec_init(AVCodecContext *avctx)
     }
 
     memset(&open_params, 0, sizeof(BmJpuDecOpenParams));
-    open_params.frame_width  = 0;
-    open_params.frame_height = 0;
+    open_params.min_frame_width = 0;
+    open_params.min_frame_height = 0;
+    open_params.max_frame_width = 0;
+    open_params.max_frame_height = 0;
     if (ctx->hw_accel)
-        open_params.chroma_interleave = 0;
+        open_params.chroma_interleave = BM_JPU_CHROMA_FORMAT_CBCR_SEPARATED;
     else
         open_params.chroma_interleave = ctx->chroma_interleave;
     open_params.bs_buffer_size = ctx->bs_buffer_size*1024;
@@ -528,7 +528,7 @@ static int bm_jpegdec_decode_frame(AVCodecContext *avctx, void *data, int *got_f
 
     *got_frame = 0;
 
-    dec_ret = bm_jpu_jpeg_dec_decode(ctx->jpeg_decoder, avpkt->data, avpkt->size);
+    dec_ret = bm_jpu_jpeg_dec_decode(ctx->jpeg_decoder, avpkt->data, avpkt->size, 0, 0);
     if (dec_ret != BM_JPU_DEC_RETURN_CODE_OK) {
         av_log(avctx, AV_LOG_ERROR,
                "Failed to call bm_jpu_jpeg_dec_decode: %s\n",
@@ -549,10 +549,8 @@ static int bm_jpegdec_decode_frame(AVCodecContext *avctx, void *data, int *got_f
            info.y_size, info.cbcr_size, info.cbcr_size);
     av_log(avctx, AV_LOG_DEBUG, "Y/Cb/Cr offset: %u/%u/%u\n",
            info.y_offset, info.cb_offset, info.cr_offset);
-    av_log(avctx, AV_LOG_DEBUG, "color format: %s\n",
-           bm_jpu_color_format_string(info.color_format));
-    av_log(avctx, AV_LOG_DEBUG, "chroma interleave: %d\n",
-           info.chroma_interleave);
+    av_log(avctx, AV_LOG_DEBUG, "image format: %s\n",
+           bm_jpu_color_format_string(info.image_format));
     av_log(avctx, AV_LOG_DEBUG, "framebuffer recycle: %d\n",
            info.framebuffer_recycle);
     av_log(avctx, AV_LOG_DEBUG, "framebuffer size: %ld\n",
@@ -570,28 +568,30 @@ static int bm_jpegdec_decode_frame(AVCodecContext *avctx, void *data, int *got_f
         return ret;
     }
 
-    switch (info.color_format) {
-    case BM_JPU_COLOR_FORMAT_YUV420:
-        if (info.chroma_interleave == 0)
-            avctx->sw_pix_fmt = AV_PIX_FMT_YUVJ420P;
-        else
-            avctx->sw_pix_fmt = AV_PIX_FMT_NV12;
+    switch (info.image_format) {
+    case BM_JPU_IMAGE_FORMAT_YUV420P:
+        avctx->sw_pix_fmt = AV_PIX_FMT_YUVJ420P;
         break;
-    case BM_JPU_COLOR_FORMAT_YUV422_HORIZONTAL:
-        if (info.chroma_interleave == 0)
-            avctx->sw_pix_fmt = AV_PIX_FMT_YUVJ422P;
-        else
-            avctx->sw_pix_fmt = AV_PIX_FMT_NV16;
+    case BM_JPU_IMAGE_FORMAT_NV12:
+    case BM_JPU_IMAGE_FORMAT_NV21:
+        avctx->sw_pix_fmt = AV_PIX_FMT_NV12;
         break;
-    case BM_JPU_COLOR_FORMAT_YUV444:
+    case BM_JPU_IMAGE_FORMAT_YUV422P:
+        avctx->sw_pix_fmt = AV_PIX_FMT_YUVJ422P;
+        break;
+    case BM_JPU_IMAGE_FORMAT_NV16:
+    case BM_JPU_IMAGE_FORMAT_NV61:
+        avctx->sw_pix_fmt = AV_PIX_FMT_NV16;
+        break;
+    case BM_JPU_IMAGE_FORMAT_YUV444P:
         avctx->sw_pix_fmt = AV_PIX_FMT_YUVJ444P;
         break;
-    case BM_JPU_COLOR_FORMAT_YUV400:
+    case BM_JPU_IMAGE_FORMAT_GRAY:
         avctx->sw_pix_fmt = AV_PIX_FMT_GRAY8;
         break;
     default:
         av_log(avctx, AV_LOG_ERROR,
-               "Unsupported color format!\n");
+               "Unsupported image format!\n");
         return AVERROR_PATCHWELCOME;
     }
 
