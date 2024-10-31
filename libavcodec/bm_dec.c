@@ -500,7 +500,6 @@ static av_cold int bm_decode_init(AVCodecContext *avctx)
     bmctx->pkg_num_inbuf = 0;
     bmctx->first_frame = 0;
     bmctx->pkt_flag = 0;
-    bmctx->getfirstframe_flag = 0;
 
     bm_handle_buffer = (BMHandleBuffer*)av_mallocz(sizeof(BMHandleBuffer));
     ff_mutex_init(&(bm_handle_buffer->av_mutex), NULL);
@@ -540,8 +539,8 @@ static void bm_buffer_release(void *opaque, uint8_t *data)
     //This is buffer you can use it before BMDEC_CLOSE.
     //if the status is BMDEC_CLOSE. the buffer unsafe.
     if (buffer->bm_handle_buffer->handle && buffer->bmframe && !buffer->released) {
-        bmvpu_dec_clear_output(buffer->bm_handle_buffer->handle, buffer->bmframe);
         free(buffer->bmframe);
+        bmvpu_dec_clear_output(buffer->bm_handle_buffer->handle, buffer->bmframe);
      }
 
 #if defined(BM1684)
@@ -1329,8 +1328,6 @@ static int bm_decode_internal(AVCodecContext *avctx, void *outdata, int *outdata
     BMVidFrame* bmframe= (BMVidFrame *)malloc(sizeof(BMVidFrame));
     AVFrame *frame = (AVFrame *)outdata;
     BMVidStream stream;
-    BMDecStatus status;
-    int timeout_cnt = 0;
 #ifdef BM_PCIE_MODE
     uint32_t align = 4;
     uint8_t *data_buf = NULL,*header_buf = NULL;
@@ -1422,10 +1419,8 @@ static int bm_decode_internal(AVCodecContext *avctx, void *outdata, int *outdata
         }
         else {
             av_log(avctx, AV_LOG_ERROR, "input queue full please check it, queue empty size:%d!!!\n", bmvpu_dec_get_all_empty_input_buf_cnt(handle));
-            if(bmvpu_dec_get_status(handle) > BMDEC_STOP) {
-                free(bmframe);
+            if(bmvpu_dec_get_status(handle) > BMDEC_STOP)
                 return AVERROR_EXTERNAL;
-            }
         }
     }
     if(ret < 0) {
@@ -1448,13 +1443,8 @@ static int bm_decode_internal(AVCodecContext *avctx, void *outdata, int *outdata
     }
 
     while ((ret = bmvpu_dec_get_output(handle, bmframe)) != BM_SUCCESS &&
-           (status=bmvpu_dec_get_status(handle)) < BMDEC_STOP &&
-           (/*bmctx->getfirstframe_flag ||*/ bmctx->endof_flag > 0 || bmvpu_dec_get_pkt_in_buf_cnt(handle) > MAX_FRAME_IN_BUFFER)) {
-        timeout_cnt++;
-        if(timeout_cnt % 30000 == 0){
-            av_log(avctx, AV_LOG_ERROR, "bmvpu_dec_get_output timeout. dec_status:%d endof_flag=%d pkg:%d\n", bmvpu_dec_get_status(handle), bmctx->endof_flag, bmvpu_dec_get_pkt_in_buf_cnt(handle));
-        }
-
+           bmvpu_dec_get_status(handle) < BMDEC_STOP &&
+           (bmctx->endof_flag > 0 || bmvpu_dec_get_pkt_in_buf_cnt(handle) > MAX_FRAME_IN_BUFFER)) {
         av_usleep(USLEEP_CLOCK);
     }
 
@@ -1462,9 +1452,6 @@ static int bm_decode_internal(AVCodecContext *avctx, void *outdata, int *outdata
         *outdata_size = 0;
         //frame->flags = frame->flags | AV_FRAME_FLAG_DISCARD;
         free(bmframe);
-        if(status == BMDEC_HUNG)
-            return AVERROR_EXTERNAL;
-
         if(bmctx->endof_flag > 0) {
             bmctx->endof_flag = 0;
             bmctx->first_frame = 0;
@@ -1476,8 +1463,6 @@ static int bm_decode_internal(AVCodecContext *avctx, void *outdata, int *outdata
             return BM_SUCCESS;  //bmvpu_dec_get_output return failed is possoble
         }
     }
-
-    bmctx->getfirstframe_flag = 1;
     if(bmctx->first_frame == 0 && avctx->skip_frame == AVDISCARD_ALL) {
         *outdata_size = 0;
         bmctx->first_frame = 1;

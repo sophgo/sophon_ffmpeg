@@ -114,7 +114,6 @@ typedef struct _BMDecContext{
     int reserved[11];
     int use_gst_flag;
     int core_idx;
-    int getfirstframe_flag;
 } BMDecContext;
 
 #ifdef __cplusplus

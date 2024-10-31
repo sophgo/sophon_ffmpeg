@@ -386,18 +386,18 @@ static void finish_output_buffer(void *context, void *acquired_handle)
 static BmVpuFramebuffer* get_src_framebuffer(AVCodecContext *avctx)
 {
     BmVpuEncContext* ctx = (BmVpuEncContext *)(avctx->priv_data);
-    BmVpuFramebuffer **fb = (BmVpuFramebuffer**)bm_queue_pop(ctx->frame_unused_queue);
+    BmVpuFramebuffer *fb = *((BmVpuFramebuffer**)bm_queue_pop(ctx->frame_unused_queue));
     int i;
 
-    if (fb == NULL || *fb == NULL) {
+    if (fb == NULL) {
         av_log(avctx, AV_LOG_ERROR, "frame buffer is NULL, pop\n");
         return NULL;
     }
 
-    av_log(avctx, AV_LOG_TRACE, "myIndex = 0x%x, %p, pop\n", (*fb)->myIndex, *fb);
+    av_log(avctx, AV_LOG_TRACE, "myIndex = 0x%x, %p, pop\n", fb->myIndex, fb);
     for (i=0; i<ctx->num_src_fb; i++) {
-        if (&(ctx->src_fb_list[i]) == *fb)
-            return *fb;
+        if (&(ctx->src_fb_list[i]) == fb)
+            return fb;
     }
 
     return NULL;
