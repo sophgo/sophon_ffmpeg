@@ -1072,7 +1072,7 @@ static int bmscale_config_props_hwaccel(AVFilterLink *outlink)
     s->out_planes[0].width  = out_w;
     s->out_planes[0].height = out_h;
 
-    av_log(s, AV_LOG_ERROR, "in_fmt: %s; out_fmt: %s\n",
+    av_log(s, AV_LOG_INFO, "in_fmt: %s; out_fmt: %s\n",
            av_get_pix_fmt_name(s->in_fmt), av_get_pix_fmt_name(s->out_fmt));
 
     /* init the hardware output contexts */
