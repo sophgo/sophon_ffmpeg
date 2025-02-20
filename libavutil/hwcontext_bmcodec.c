@@ -57,6 +57,65 @@ static const enum AVPixelFormat supported_sw_formats[] = {
     AV_PIX_FMT_BGRP,
 };
 
+static int bmvpu_malloc_device_byte_heap(AVHWDeviceContext *ctx, bm_handle_t bm_handle,
+                      bm_device_mem_t *pmem, unsigned int size,
+                      int heap_id_mask, int high_bit_first)
+{
+    int ret = 0;
+    int i = 0;
+    int heap_num = 0;
+    ret = bm_get_gmem_total_heap_num(bm_handle, &heap_num);
+    if (ret != 0)
+    {
+        av_log(ctx, AV_LOG_ERROR, "bmvpu_malloc_device_byte_heap failed!\n");
+        return -1;
+    }
+
+    int available_heap_mask = 0;
+    for (i=0; i<heap_num; i++){
+        available_heap_mask = available_heap_mask | (0x1 << i);
+    }
+
+    int enable_heap_mask = available_heap_mask & heap_id_mask;
+    if (enable_heap_mask == 0x0)
+    {
+        av_log(ctx, AV_LOG_ERROR, "bmvpu_malloc_device_byte_heap failed!\n");
+        return -1;
+    }
+    if (high_bit_first)
+    {
+        for (i=(heap_num-1); i>=0; i--)
+        {
+            if ((enable_heap_mask & (0x1<<i)))
+            {
+                ret = bm_malloc_device_byte_heap(bm_handle, pmem, i, size);
+                if (ret != 0)
+                {
+                    av_log(ctx, AV_LOG_ERROR, "bm_malloc_device_byte_heap failed! size(%d)\n",size);
+                }
+                return ret;
+            }
+        }
+    }
+    else
+    {
+        for (i=0; i<heap_num; i++)
+        {
+            if ((enable_heap_mask & (0x1<<i)))
+            {
+                ret = bm_malloc_device_byte_heap(bm_handle, pmem, i, size);
+                if (ret != 0)
+                {
+                    av_log(ctx, AV_LOG_ERROR, "bm_malloc_device_byte_heap failed! size(%d)\n",size);
+                }
+                return ret;
+            }
+        }
+    }
+
+    return BM_VPU_ENC_RETURN_CODE_OK;
+}
+
 static int bmcodec_device_create(AVHWDeviceContext *ctx, const char *device,
                                  AVDictionary *opts, int flags)
 {
@@ -201,7 +260,7 @@ static AVBufferRef* bmcodec_pool_alloc(void *opaque, int size)
 
     /* call bm allocation function to allocate buffer */
     bm_device_mem_t *buffer = (bm_device_mem_t *)av_mallocz(sizeof(bm_device_mem_t));
-    ret = bmvpu_malloc_device_byte_heap(hwctx->handle, buffer, size, HEAP_MASK_1_2, 1);
+    ret = bmvpu_malloc_device_byte_heap(ctx, hwctx->handle, buffer, size, HEAP_MASK_1_2, 1);
     if(ret != BM_SUCCESS)
     {
         av_free(buffer);

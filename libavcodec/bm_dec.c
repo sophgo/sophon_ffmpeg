@@ -326,46 +326,14 @@ static enum AVPixelFormat bm_format_to_av_pixel_format(AVCodecContext *avctx, BM
 {
     enum AVPixelFormat fmt;
 
-    switch (bmframe->frameFormat) {
-    case 0:
-        if(bmframe->cbcrInterleave == 1) {
-            if(bmframe->nv21 == 0)
-                fmt = AV_PIX_FMT_NV12;
-            else if(bmframe->nv21 == 1)
-                fmt = AV_PIX_FMT_NV21;
-            else
-                fmt = AV_PIX_FMT_NONE;
-        }
-        else if(bmframe->cbcrInterleave == 0)
-            fmt = AV_PIX_FMT_YUV420P;
-        else
-            fmt = AV_PIX_FMT_NONE;
-        break;
-    case 1:
+    if (bmframe->pixel_format == BM_VPU_DEC_PIX_FORMAT_NV12)
         fmt = AV_PIX_FMT_NV12;
-        break;
-    case 2:
-        fmt = AV_PIX_FMT_YUYV422;
-        break;
-    case 3:
-        fmt = AV_PIX_FMT_YUV422P;
-        break;
-    case 5:
-        if(bmframe->cbcrInterleave)
-            fmt = AV_PIX_FMT_P016BE;
-        else
-            fmt = AV_PIX_FMT_YUV420P16BE;
-        break;
-    case 6:
-        if(bmframe->cbcrInterleave)
-            fmt = AV_PIX_FMT_P016LE;
-        else
-            fmt = AV_PIX_FMT_YUV420P16LE;
-        break;
-    default:
-        fmt = AV_PIX_FMT_NONE;
-        break;
-    }
+    else if (bmframe->pixel_format == BM_VPU_DEC_PIX_FORMAT_NV21)
+        fmt = AV_PIX_FMT_NV21;
+    else if (bmframe->pixel_format == BM_VPU_DEC_PIX_FORMAT_COMPRESSED)
+        fmt = AV_PIX_FMT_NV12;
+    else
+        fmt = AV_PIX_FMT_YUV420P;
 
     av_log(avctx, AV_LOG_TRACE, "[%s,%d] pixel_fmt:%s\n",
            __func__, __LINE__, av_get_pix_fmt_name(fmt));
@@ -487,7 +455,12 @@ static av_cold int bm_decode_init(AVCodecContext *avctx)
 
     av_log(avctx, AV_LOG_INFO, "bm output format: %d\n", bmctx->output_format);
 
-    param.cbcrInterleave = bmctx->cbcr_interleave;
+    if(bmctx->cbcr_interleave == 1)
+        param.pixel_format = BM_VPU_DEC_PIX_FORMAT_NV12;
+    else if(bmctx->cbcr_interleave == 2)
+        param.pixel_format = BM_VPU_DEC_PIX_FORMAT_NV21;
+    else
+        param.pixel_format = BM_VPU_DEC_PIX_FORMAT_YUV420P;
     param.wtlFormat      = bmctx->output_format;
 
     if (bmctx->secondary_axi == 0 || bm_id == STD_VC1){
@@ -532,7 +505,7 @@ static av_cold int bm_decode_init(AVCodecContext *avctx)
     ret = bmvpu_dec_create(&handle, param);
     if (ret != 0) {
         av_log(avctx, AV_LOG_ERROR, "bmvpu_dec_create failed\n");
-        ret = AVERROR_INVALIDDATA;
+        ret = AVERROR_EXTERNAL;
     }
     bmctx->handle = handle;
     bmctx->endof_flag = 0;
@@ -886,7 +859,7 @@ static int bm_fill_frame(AVCodecContext *avctx, BMVidFrame* bmframe, AVFrame* fr
                                         NULL,
                                         AV_BUFFER_FLAG_READONLY);
 
-        if (bmframe->cbcrInterleave == 0) {
+        if (bmframe->pixel_format == BM_VPU_DEC_PIX_FORMAT_YUV420P) {
             frame->buf[2] = av_buffer_create(bmframe->buf[6],
                                             bmframe->stride[2]*AV_CEIL_RSHIFT(bmframe->height, desc->log2_chroma_h),
                                             bm_buffer_release2,
@@ -920,7 +893,7 @@ static int bm_fill_frame(AVCodecContext *avctx, BMVidFrame* bmframe, AVFrame* fr
                                         AV_BUFFER_FLAG_READONLY);
         frame->data[1] = bmframe->buf[1];
 
-        if (bmframe->cbcrInterleave == 0) {
+        if (bmframe->pixel_format == BM_VPU_DEC_PIX_FORMAT_YUV420P) {
             frame->buf[2] = av_buffer_create(bmframe->buf[2],
                                             bmframe->stride[2]*AV_CEIL_RSHIFT(bmframe->height, desc->log2_chroma_h),
                                             bm_buffer_release2,
@@ -942,7 +915,7 @@ static int bm_fill_frame(AVCodecContext *avctx, BMVidFrame* bmframe, AVFrame* fr
             else
                 buffer->buf0 = av_malloc(bmframe->size);
             buffer->buf1 = buffer->buf0 + (unsigned int)(bmframe->buf[5] - bmframe->buf[4]);
-            if(bmframe->cbcrInterleave == 0)
+            if(bmframe->pixel_format == BM_VPU_DEC_PIX_FORMAT_YUV420P)
                 buffer->buf2 = buffer->buf0 + (unsigned int)(bmframe->buf[6] - bmframe->buf[4]);
         } else {
             buffer->buf0 = NULL;
@@ -970,7 +943,7 @@ static int bm_fill_frame(AVCodecContext *avctx, BMVidFrame* bmframe, AVFrame* fr
                                         AV_BUFFER_FLAG_READONLY);
         frame->data[1] = buffer->buf1;
 
-        if(bmframe->cbcrInterleave == 0) {
+        if(bmframe->pixel_format == BM_VPU_DEC_PIX_FORMAT_YUV420P) {
             frame->buf[2] = av_buffer_create(buffer->buf2,
                                             bmframe->stride[2]*AV_CEIL_RSHIFT(bmframe->height, desc->log2_chroma_h),
                                             bm_buffer_release2,
@@ -1446,7 +1419,12 @@ SEND_PKG:
                     ret = 0;
 
                 if (get_frame == 1) {
-                    usleep(100);
+                    usleep(1000);
+                    overtime_cnt++;
+                    if(ret ==  BM_ERR_VDEC_SEQ_CHANGE || overtime_cnt % bmctx->timeout == 0) {
+                        av_log(avctx, AV_LOG_WARNING, "send stream error... free input buffer:%d ret=%d\n", bmvpu_dec_get_all_empty_input_buf_cnt(handle), ret);
+                        return 0;
+                    }
                     goto SEND_PKG;
                 }
             }
@@ -1481,6 +1459,7 @@ FLUSH_FRAME:
     }
 
 GET_FRAME:
+    memset(bmframe, 0, sizeof(BMVidFrame));
     get_frame_state = bmvpu_dec_get_output(handle, bmframe);
     if(get_frame_state == BM_SUCCESS) {
         if(bmctx->first_frame_get == 0) {
@@ -1513,7 +1492,7 @@ GET_FRAME:
 
         if(send_pkg == 1) {
             if(ret < 0) {
-                av_log(avctx, AV_LOG_ERROR, "maybe meet a error. didn't get frame.\n");
+                av_log(avctx, AV_LOG_ERROR, "maybe meet a error. didn't get frame. ret=%d\n", ret);
             }
             free(bmframe);
             return ret;
@@ -1521,11 +1500,13 @@ GET_FRAME:
         else {
             usleep(1000);
             overtime_cnt += 1;
-            if(overtime_cnt == 10000){
-                av_log(avctx, AV_LOG_ERROR, "maybe meet a error. didn't get frame. free input buffer:%d\n", bmvpu_dec_get_all_empty_input_buf_cnt(handle));
-                overtime_cnt = 0;
-                if(bmvpu_dec_get_status(handle) == BMDEC_STOP)
+            if(overtime_cnt % bmctx->timeout == 0){
+                if(bmvpu_dec_get_status(handle) == BMDEC_STOP || overtime_cnt / bmctx->timeout > 30){
+                    av_log(avctx, AV_LOG_ERROR, "maybe meet a error. didn't get frame. free input buffer:%d dec status:%d\n",
+                        bmvpu_dec_get_all_empty_input_buf_cnt(handle), bmvpu_dec_get_status(handle));
+                    free(bmframe);
                     return AVERROR_EXTERNAL;
+                }
             }
             if (bmvpu_dec_get_all_empty_input_buf_cnt(handle) > 0)
                 goto SEND_PKG;
@@ -1670,7 +1651,7 @@ static av_cold void bm_flush_dec(AVCodecContext *avctx)
     BMDecContext* bmctx = (BMDecContext*)(avctx->priv_data);
     BMVidCodHandle handle = bmctx->handle;
 
-    bmvpu_dec_flush(handle);
+    bmvpu_dec_get_all_frame_in_buffer(handle);
 }
 
 static av_cold int bm_close(AVCodecContext *avctx)
@@ -1751,8 +1732,10 @@ static const AVOption options[] = {
         OFFSET(core_idx), AV_OPT_TYPE_INT, {.i64 = -1}, -1, 3, FLAGS },
     {"size_input_buffer","input buffer size of video decoder bitstream (0x200000, 0x700000)",
         OFFSET(size_input_buffer), AV_OPT_TYPE_INT, {.i64 = 0x400000} , 0X200000, 0X700000, FLAGS },
-    {"cmd_queue","decoder command queue depth",
+    {"dec_cmd_queue","decoder command queue depth",
         OFFSET(dec_cmd_queue), AV_OPT_TYPE_INT, {.i64 = 4} , 1, 4, FLAGS },
+    {"timeout","decoder timeout max count",
+        OFFSET(timeout), AV_OPT_TYPE_INT, {.i64 = 1000} , 0, INT_MAX, FLAGS },
     { NULL},
 };
 

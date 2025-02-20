@@ -50,7 +50,7 @@
 #include "codec_internal.h"
 
 #include "bm_jpeg_interface.h"
-#include "bm_jpeg_logging.h"
+#include "bm_jpeg_internal.h"
 #include "bm_jpeg_common.h"
 #include "bmlib_runtime.h"
 #include "config_components.h"
@@ -469,8 +469,8 @@ static av_cold int bm_jpegdec_init(AVCodecContext *avctx)
 
     memset(&open_params, 0, sizeof(BmJpuDecOpenParams));
     // FIXME: set width and height
-    open_params.frame_width  = avctx->width;
-    open_params.frame_height = avctx->height;
+    //open_params.frame_width  = avctx->width;
+    //open_params.frame_height = avctx->height;
     if (ctx->hw_accel)
         open_params.chroma_interleave = 0;
     else
@@ -558,7 +558,7 @@ static int bm_jpegdec_decode_frame(AVCodecContext *avctx, void *data, int *got_f
     fclose(fp);
 #endif
 
-    dec_ret = bm_jpu_jpeg_dec_decode(ctx->jpeg_decoder, avpkt->data, avpkt->size);
+    dec_ret = bm_jpu_jpeg_dec_decode(ctx->jpeg_decoder, avpkt->data, avpkt->size, 0, 0);
     if (dec_ret != BM_JPU_DEC_RETURN_CODE_OK) {
         av_log(avctx, AV_LOG_ERROR,
                "Failed to call bm_jpu_jpeg_dec_decode: %s\n",
@@ -580,10 +580,8 @@ static int bm_jpegdec_decode_frame(AVCodecContext *avctx, void *data, int *got_f
            info.y_size, info.cbcr_size, info.cbcr_size);
     av_log(avctx, AV_LOG_DEBUG, "Y/Cb/Cr offset: %u/%u/%u\n",
            info.y_offset, info.cb_offset, info.cr_offset);
-    av_log(avctx, AV_LOG_DEBUG, "color format: %s\n",
-           bm_jpu_color_format_string(info.color_format));
-    av_log(avctx, AV_LOG_DEBUG, "chroma interleave: %d\n",
-           info.chroma_interleave);
+    av_log(avctx, AV_LOG_DEBUG, "image format: %s\n",
+           bm_jpu_image_format_string(info.image_format));
 
     if (info.framebuffer == NULL) {
         av_log(avctx, AV_LOG_ERROR,
@@ -597,23 +595,23 @@ static int bm_jpegdec_decode_frame(AVCodecContext *avctx, void *data, int *got_f
         return ret;
     }
 
-    switch (info.color_format) {
-    case BM_JPU_COLOR_FORMAT_YUV420:
-        if (info.chroma_interleave == 0)
-            avctx->sw_pix_fmt = AV_PIX_FMT_YUVJ420P;
-        else
-            avctx->sw_pix_fmt = AV_PIX_FMT_NV12;
+    switch (info.image_format) {
+    case BM_JPU_IMAGE_FORMAT_YUV420P:
+        avctx->sw_pix_fmt = AV_PIX_FMT_YUVJ420P;
         break;
-    case BM_JPU_COLOR_FORMAT_YUV422_HORIZONTAL:
-        if (info.chroma_interleave == 0)
-            avctx->sw_pix_fmt = AV_PIX_FMT_YUVJ422P;
-        else
-            avctx->sw_pix_fmt = AV_PIX_FMT_NV16;
+    case BM_JPU_IMAGE_FORMAT_NV12:
+        avctx->sw_pix_fmt = AV_PIX_FMT_NV12;
         break;
-    case BM_JPU_COLOR_FORMAT_YUV444:
+    case BM_JPU_IMAGE_FORMAT_YUV422P:
+        avctx->sw_pix_fmt = AV_PIX_FMT_YUVJ422P;
+        break;
+    case BM_JPU_IMAGE_FORMAT_NV16:
+        avctx->sw_pix_fmt = AV_PIX_FMT_NV16;
+        break;
+    case BM_JPU_IMAGE_FORMAT_YUV444P:
         avctx->sw_pix_fmt = AV_PIX_FMT_YUVJ444P;
         break;
-    case BM_JPU_COLOR_FORMAT_YUV400:
+    case BM_JPU_IMAGE_FORMAT_GRAY:
         avctx->sw_pix_fmt = AV_PIX_FMT_GRAY8;
         break;
     default:
