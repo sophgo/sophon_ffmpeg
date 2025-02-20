@@ -1,14 +1,14 @@
 /*
  * Copyright (C) Cvitek Co., Ltd. 2019-2020. All rights reserved.
  *
- * File Name: ldc_uapi.h
+ * File name: ldc_uapi.h
  * Description:
  */
 
 #ifndef _U_LDC_UAPI_H_
 #define _U_LDC_UAPI_H_
 
-#include <linux/cvi_comm_gdc.h>
+#include <linux/comm_gdc.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,104 +25,111 @@ enum cvi_ldc_op {
 };
 
 struct cvi_ldc_buffer {
-	__u8 pixel_fmt; // 0: Y only, 1: NV21
-	__u8 rot;
-	__u16 bgcolor; // data outside start/end if used in operation
+	unsigned char pixel_fmt; // 0: Y only, 1: NV21
+	unsigned char rot;
+	unsigned short bgcolor; // data outside start/end if used in operation
 
-	__u16 src_width; // src width, including padding
-	__u16 src_height; // src height, including padding
+	unsigned short src_width; // src width, including padding
+	unsigned short src_height; // src height, including padding
 
-	__u32 src_y_base;
-	__u32 src_c_base;
-	__u32 dst_y_base;
-	__u32 dst_c_base;
+	unsigned int src_y_base;
+	unsigned int src_c_base;
+	unsigned int dst_y_base;
+	unsigned int dst_c_base;
 
-	__u32 map_base;
+	unsigned int map_base;
 };
 
 struct cvi_ldc_rot {
-	__u64 handle;
+	unsigned long long handle;
 
-	void *pUsageParam;
+	void *usage_param;
 	void *vb_in;
-	__u32 enPixFormat;
-	__u64 mesh_addr;
-	__u8 sync_io;
+	unsigned int pix_format;
+	unsigned long long mesh_addr;
+	unsigned char sync_io;
 	void *cb;
-	void *pcbParam;
-	__u32 cbParamSize;
-	__u32 enModId;
-	__u32 enRotation;
+	void *cb_param;
+	unsigned int cb_param_size;
+	unsigned int mod_id;
+	unsigned int rotation;
 };
 
 struct gdc_handle_data {
-	__u64 handle;
+	unsigned long long handle;
 };
 
 /*
- * stImgIn: Input picture
- * stImgOut: Output picture
- * au64privateData[4]: RW; Private data of task
+ * img_in: Input picture
+ * img_out: Output picture
+ * private_data[4]: RW; Private data of task
  * reserved: RW; Debug information,state of current picture
  */
 struct gdc_task_attr {
-	__u64 handle;
+	unsigned long long handle;
 
-	struct _VIDEO_FRAME_INFO_S stImgIn;
-	struct _VIDEO_FRAME_INFO_S stImgOut;
-	__u64 au64privateData[4];
-	__u32 enRotation;
-	__u64 reserved;
+	video_frame_info_s img_in;
+	video_frame_info_s img_out;
+	unsigned long long private_data[4];
+	unsigned int rotation;
+	unsigned long long reserved;
 	union {
-		FISHEYE_ATTR_S stFishEyeAttr;
-		AFFINE_ATTR_S stAffineAttr;
-		LDC_ATTR_S stLDCAttr;
+		fisheye_attr_s fisheye_attr;
+		affine_attr_s affine_attr;
+		ldc_attr_s ldc_attr;
+		warp_attr_s warp_attr;
 	};
 
-	CVI_U64 meshHandle;
-	struct _LDC_BUF_WRAP_S stBufWrap;
-	CVI_U32 bufWrapDepth;
-	CVI_U64 bufWrapPhyAddr;
+	unsigned long long mesh_handle;
+	ldc_buf_wrap_s buf_wrap;
+	unsigned int buf_warp_depth;
+	unsigned long long buf_warp_phy_addr;
 };
 
 struct gdc_identity_attr {
-	__u64 handle;
-	GDC_IDENTITY_ATTR_S attr;
+	unsigned long long handle;
+	gdc_identity_attr_s attr;
 };
 
 struct gdc_chn_frm_cfg {
-	VIDEO_FRAME_INFO_S VideoFrame;
-	CVI_S32 MilliSec;
+	video_frame_info_s video_frame;
+	int milli_sec;
 	struct gdc_identity_attr identity;
 };
 
 struct ldc_buf_wrap_cfg {
-	__u64 handle;
-	struct gdc_task_attr stTask;
-	struct _LDC_BUF_WRAP_S stBufWrap;
+	unsigned long long handle;
+	struct gdc_task_attr task;
+	ldc_buf_wrap_s buf_wrap;
 };
 
 struct ldc_vb_pool_cfg {
 	void *reserved;
-	__u32 VbPool;
+	unsigned int vb_pool;
 };
 
-#define CVI_LDC_BEGIN_JOB _IOWR('L', 0x00, struct gdc_handle_data)
-#define CVI_LDC_END_JOB _IOW('L', 0x01, struct gdc_handle_data)
-#define CVI_LDC_CANCEL_JOB _IOW('L', 0x02, unsigned long long)
-#define CVI_LDC_ADD_ROT_TASK _IOW('L', 0x03, struct gdc_task_attr)
-#define CVI_LDC_ADD_LDC_TASK _IOW('L', 0x04, struct gdc_task_attr)
-#define CVI_LDC_INIT _IO('L', 0x05)
-#define CVI_LDC_DEINIT _IO('L', 0x06)
-#define CVI_LDC_SET_JOB_IDENTITY _IOW('L', 0x07, struct gdc_identity_attr)
-#define CVI_LDC_GET_WORK_JOB _IOR('L', 0x08, struct gdc_handle_data)
-#define CVI_LDC_GET_CHN_FRM _IOWR('L', 0x09, struct gdc_chn_frm_cfg)
+#define LDC_BEGIN_JOB _IOWR('L', 0x00, struct gdc_handle_data)
+#define LDC_END_JOB _IOW('L', 0x01, struct gdc_handle_data)
+#define LDC_CANCEL_JOB _IOW('L', 0x02, unsigned long long)
+#define LDC_ADD_ROT_TASK _IOW('L', 0x03, struct gdc_task_attr)
+#define LDC_ADD_LDC_TASK _IOW('L', 0x04, struct gdc_task_attr)
+#define LDC_INIT _IO('L', 0x05)
+#define LDC_DEINIT _IO('L', 0x06)
+#define LDC_SET_JOB_IDENTITY _IOW('L', 0x07, struct gdc_identity_attr)
+#define LDC_GET_WORK_JOB _IOR('L', 0x08, struct gdc_handle_data)
+#define LDC_GET_CHN_FRM _IOWR('L', 0x09, struct gdc_chn_frm_cfg)
 
-#define CVI_LDC_SET_BUF_WRAP _IOW('L', 0x0a, struct ldc_buf_wrap_cfg)
-#define CVI_LDC_GET_BUF_WRAP _IOWR('L', 0x0b, struct ldc_buf_wrap_cfg)
-#define CVI_LDC_ATTACH_VB_POOL _IOW('L', 0x0c, struct ldc_vb_pool_cfg)
-#define CVI_LDC_DETACH_VB_POOL _IO('L', 0x0d)
-
+// #define LDC_SET_BUF_WRAP _IOW('L', 0x0a, struct ldc_buf_wrap_cfg)
+// #define LDC_GET_BUF_WRAP _IOWR('L', 0x0b, struct ldc_buf_wrap_cfg)
+#define LDC_ATTACH_VB_POOL _IOW('L', 0x0c, struct ldc_vb_pool_cfg)
+#define LDC_DETACH_VB_POOL _IO('L', 0x0d)
+#define LDC_SUSPEND _IO('L',0x0e)
+#define LDC_RESUME _IO('L',0x0f)
+#define LDC_ADD_COR_TASK _IOW('D', 0x10, struct gdc_task_attr)
+#define LDC_ADD_AFF_TASK _IOW('D', 0x11, struct gdc_task_attr)
+#define LDC_ADD_WAR_TASK _IOW('D', 0x12, struct gdc_task_attr)
+#define LDC_ADD_LDC_LDC_TASK _IOW('D', 0x13, struct gdc_task_attr)
+#define LDC_ADD_DWA_ROT_TASK _IOW('D', 0x14, struct gdc_task_attr)
 #ifdef __cplusplus
 }
 #endif

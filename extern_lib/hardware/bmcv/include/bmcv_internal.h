@@ -99,7 +99,8 @@ typedef signed long long int s64;
 #define BMCV_LOG_TAG "BMCV"
 #define MAX_BMCV_LOG_BUFFER_SIZE (256)
 #define MAX_bm_image_CHANNEL 4
-#define BM1688 0x1686a200
+#define BM1688 0x1688
+#define BM1688_PREV 0x1686a200
 #define COLOR_SPACE_YUV             0
 #define COLOR_SPACE_RGB             1
 #define COLOR_SPACE_HSV             2
@@ -228,6 +229,7 @@ typedef struct bm_image_private{
     bool            attached;
     bool            data_owned;
     bool            default_stride;
+    bool            owned_mem;
 #ifndef USING_CMODEL
     BmJpuJPEGDecoder *decoder;
 #endif
@@ -249,6 +251,12 @@ typedef struct bm_api_width_align {
     int dst_h_stride;
     int data_size;
 } bm_api_cv_width_align_t;
+
+struct dynamic_load_param{
+    int api_id;
+    size_t size;
+    char param[0];
+};
 
 plane_layout set_plane_layout(int n, int c, int h, int w, int Dsize);
 
@@ -292,6 +300,7 @@ bm_status_t bm_destroy_dwa_fd(void);
 bm_status_t sg_image_alloc_dev_mem(bm_image image, int heap_id);
 bm_status_t sg_malloc_device_mem(bm_handle_t handle, sg_device_mem_st *pmem, unsigned int size);
 void sg_free_device_mem(bm_handle_t handle, sg_device_mem_st mem);
+bm_status_t bm_kernel_main_launch(bm_handle_t handle, int api_id, void *param, size_t size);
 
 #ifdef _FPGA
 bm_status_t bm_memcpy_s2d_fpga(bm_handle_t handle, bm_device_mem_t dst, void *src);

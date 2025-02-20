@@ -38,9 +38,25 @@
 extern "C" {
 #endif
 
-#include "bmvpuapi_common.h"
 
 #define BMVPUAPI_VERSION "1.0.0"
+
+
+#ifndef u64
+#ifdef _WIN32
+typedef unsigned long long u64;
+#elif __linux__
+typedef unsigned long u64;
+#endif
+#endif
+
+#ifndef u32
+#ifdef _WIN32
+typedef unsigned int u32;
+#endif
+#endif
+
+
 
 /**
  * How to use the encoder:
@@ -68,42 +84,26 @@ extern "C" {
  *     bmvpu_enc_set_default_open_params() and afterwards set any explicit valus.
  *  3. Call bmvpu_enc_open(), passing in a pointer to the filled BmVpuEncOpenParams
  *     instance, and the DMA buffer of the bitstream which was allocated in step 1.
- *  4. Call bmvpu_enc_get_initial_info(). The encoder's initial info contains the
- *     minimum number of framebuffers that must be allocated and registered, and the
- *     address alignment that must be used when allocating DMA memory  for these
- *     framebuffers.
- *  5. (Optional) Perform the necessary size and alignment calculations by calling
- *     bmvpu_calc_framebuffer_sizes(). Pass in the width & height of the frames that
- *     shall be encoded.
- *  6. Create an array of at least as many BmVpuFramebuffer instances as specified in
- *     min_num_rec_fb. Each instance must point to a DMA buffer that is big
- *     enough to hold a frame. If step 5 was performed, allocating as many bytes as indicated
- *     by total_size is enough. Make sure the Y,Cb,Cr offsets in each BmVpuFramebuffer instance
- *     are valid. Using the bmvpu_fill_framebuffer_params() convenience function for this is
- *     recommended. Note that these framebuffers are used for temporary internal encoding only,
- *     and will not contain input or output data.
- *  7. Call bmvpu_enc_register_framebuffers() and pass in the BmVpuFramebuffer array
- *     and the number of BmVpuFramebuffer instances allocated in step 6.
- *  8. (Optional) allocate an array of at least as many DMA buffers as specified in
+ *  4. (Optional) allocate an array of at least as many DMA buffers as specified in
  *     min_num_src_fb for the input frames. If the incoming data is already stored in DMA buffers,
  *     this step can be omitted, since the encoder can then read the data directly.
- *  9. Create an instance of BmVpuRawFrame, set its values to zero.
- * 10. Create an instance of BmVpuEncodedFrame. Set its values to zero.
- * 11. Set the framebuffer pointer of the BmVpuRawFrame's instance from step 9 to refer to the
- *     input DMA buffer (either the one allocated in step 8, or the one containing the input data if
+ *  5. Create an instance of BmVpuRawFrame, set its values to zero.
+ *  6. Create an instance of BmVpuEncodedFrame. Set its values to zero.
+ *  7. Set the framebuffer pointer of the BmVpuRawFrame's instance from step 6 to refer to the
+ *     input DMA buffer (either the one allocated in step 5, or the one containing the input data if
  *     it already comes in DMA memory).
- * 12. Fill an instance of BmVpuEncParams with valid values. It is recommended to first set its
+ *  8. Fill an instance of BmVpuEncParams with valid values. It is recommended to first set its
  *     values to zero by using memset(). It is essential to make sure the acquire_output_buffer() and
  *     finish_output_buffer() function pointers are set, as these are used for acquiring buffers
  *     to write encoded output data into.
- * 13. (Optional) If step 8 was performed, and therefore input data does *not* come in DMA memory,
- *     copy the pixels from the raw input frames into the DMA buffer allocated in step 8. Otherwise,
+ *  9. (Optional) If step 5 was performed, and therefore input data does *not* come in DMA memory,
+ *     copy the pixels from the raw input frames into the DMA buffer allocated in step 5. Otherwise,
  *     if the raw input frames are already stored in DMA memory, this step can be omitted.
- * 14. Call bmvpu_enc_encode(). Pass the raw frame, the encoded frame, and the encoding param
- *     structures from steps 9, 10, and 12 to it.
+ * 10. Call bmvpu_enc_encode(). Pass the raw frame, the encoded frame, and the encoding param
+ *     structures from steps 6, 7, and 9 to it.
  *     This function will encode data, and acquire an output buffer to write the encoded data into
- *     by using the acquire_output_buffer() function pointer set in step 12. Once it is done
- *     encoding, it will call the finish_output_buffer() function from step 12. Any handle created
+ *     by using the acquire_output_buffer() function pointer set in step 9. Once it is done
+ *     encoding, it will call the finish_output_buffer() function from step 9. Any handle created
  *     by acquire_output_buffer() will be copied over to the encoded data frame structure. When
  *     bmvpu_enc_encode() exits, this handle can then be used to further process the output data.
  *     It is guaranteed that once acquire_output_buffer() was called, finish_output_buffer() will
@@ -111,29 +111,382 @@ extern "C" {
  *     The BM_VPU_ENC_OUTPUT_CODE_ENCODED_FRAME_AVAILABLE output code bit will always be set
  *     unless the function returned a code other than BM_VPU_ENC_RETURN_CODE_OK.
  *     If the BM_VPU_ENC_OUTPUT_CODE_CONTAINS_HEADER bit is set, then header data has been
- *     written in the output memory block allocated in step 10. It is placed right before the
+ *     written in the output memory block allocated in step 7. It is placed right before the
  *     actual encoded frame data. bmvpu_enc_encode() will pass over the combined size of the header
  *     and the encoded frame data to acquire_output_buffer() in this case, ensuring that the output
  *     buffers are big enough.
- * 15. Repeat steps 11 to 14 until there are no more frames to encode or an error occurs.
- * 16. After encoding is finished, close the encoder with bmvpu_enc_close().
- * 17. Deallocate framebuffer memory blocks, the input DMA buffer block, the output memory block,
+ * 11. Repeat steps 8 to 11 until there are no more frames to encode or an error occurs.
+ * 12. After encoding is finished, close the encoder with bmvpu_enc_close().
+ * 13. Deallocate framebuffer memory blocks, the input DMA buffer block, the output memory block,
  *     and the bitstream buffer memory block.
  *
- * The VPU's encoders only support the BM_VPU_COLOR_FORMAT_YUV420 format.
+ * The VPU's encoders only support the BM_VPU_ENC_PIX_FORMAT_YUV420P format.
  */
 
-
+/**************************************************/
+/******* LOG STRUCTURES AND FUNCTIONS *******/
+/**************************************************/
 /* Log levels. */
 typedef enum
 {
     BMVPU_ENC_LOG_LEVEL_ERROR   = 0,
     BMVPU_ENC_LOG_LEVEL_WARNING = 1,
     BMVPU_ENC_LOG_LEVEL_INFO    = 2,
-    BMVPU_ENC_LOG_LEVEL_DEBUG   = 3,
-    BMVPU_ENC_LOG_LEVEL_LOG     = 4,
-    BMVPU_ENC_LOG_LEVEL_TRACE   = 5
+    BMVPU_ENC_LOG_LEVEL_DEBUG   = 3, /* only useful for developers */
+    BMVPU_ENC_LOG_LEVEL_LOG     = 4, /* only useful for developers */
+    BMVPU_ENC_LOG_LEVEL_TRACE   = 5  /* only useful for developers */
 } BmVpuEncLogLevel;
+
+/* Function pointer type for logging functions.
+ *
+ * This function is invoked by BM_VPU_LOG() macro calls. This macro also passes the name
+ * of the source file, the line in that file, and the function name where the logging occurs
+ * to the logging function (over the file, line, and fn arguments, respectively).
+ * Together with the log level, custom logging functions can output this metadata, or use
+ * it for log filtering etc.*/
+typedef void (*BmVpuEncLoggingFunc)(BmVpuEncLogLevel level, char const *file, int const line,
+                                 char const *fn, const char *format, ...);
+
+/* Defines the threshold for logging. Logs with lower priority are discarded.
+ * By default, the threshold is set to BMVPU_ENC_LOG_LEVEL_INFO. */
+DECL_EXPORT void bmvpu_enc_set_logging_threshold(BmVpuEncLogLevel threshold);
+
+/* Defines a custom logging function.
+ * If logging_fn is NULL, logging is disabled. This is the default value. */
+DECL_EXPORT void bmvpu_enc_set_logging_function(BmVpuEncLoggingFunc logging_fn);
+
+/* Get the threshold for logging. */
+DECL_EXPORT BmVpuEncLogLevel bmvpu_enc_get_logging_threshold(void);
+
+
+
+
+/**************************************************/
+/******* ALLOCATOR STRUCTURES AND FUNCTIONS *******/
+/**************************************************/
+
+/* Typedef for physical addresses */
+#ifdef __linux__
+typedef unsigned long bmvpu_phys_addr_t;
+#elif _WIN32
+typedef unsigned long long bmvpu_phys_addr_t;
+#endif
+
+/* BmVpuAllocationFlags: flags for the BmVpuEncDMABufferAllocator's allocate vfunc */
+typedef enum
+{
+    BM_VPU_ALLOCATION_FLAG_CACHED       = 0,
+    BM_VPU_ALLOCATION_FLAG_WRITECOMBINE = 1,
+    BM_VPU_ALLOCATION_FLAG_UNCACHED     = 2
+} BmVpuAllocationFlags;
+
+#define BM_VPU_ALLOCATION_FLAG_DEFAULT    BM_VPU_ALLOCATION_FLAG_WRITECOMBINE
+
+
+typedef struct {
+    unsigned int  size;
+    uint64_t      phys_addr;
+    uint64_t      virt_addr;
+    int           enable_cache;
+    int           dmabuf_fd;  //users cannot change it.
+} BmVpuEncDMABuffer;
+
+/**
+ * Upload data from HOST to a VPU core.
+ * For now, only support PCIE mode.
+ *
+ * return value:
+ *   -1, failed
+ *    0, done
+ */
+DECL_EXPORT int bmvpu_enc_upload_data(int vpu_core_idx,
+                      const uint8_t* host_va, int host_stride,
+                      uint64_t vpu_pa, int vpu_stride,
+                      int width, int height);
+
+/**
+ * Download data from a VPU core to HOST.
+ * For now, only support PCIE mode.
+ *
+ * return value:
+ *   -1, failed
+ *    0, done
+ */
+DECL_EXPORT int bmvpu_enc_download_data(int vpu_core_idx,
+                        uint8_t* host_va, int host_stride,
+                        uint64_t vpu_pa, int vpu_stride,
+                        int width, int height);
+
+/* Function pointer used during bmvpu_enc_open for allocate physical buffers.
+ * vpu_core_idx: the buffer used by specified core
+ * buf: the output physical buffer info
+ * size: the input size for allocate physical buffer
+*/
+typedef void* (*BmVpuEncBufferAllocFunc)(void *context, int vpu_core_idx,
+                                    BmVpuEncDMABuffer *buf, unsigned int size);
+typedef void* (*BmVpuEncBufferFreeFunc)(void *context, int vpu_core_idx,
+                                    BmVpuEncDMABuffer *buf);
+
+/**
+ * Alloc device memory according to the specified heap_id.
+ * return value:
+ *   -1, failed
+ *    0, done
+ */
+DECL_EXPORT int bmvpu_enc_dma_buffer_allocate(int vpu_core_idx, BmVpuEncDMABuffer *buf, unsigned int size);
+
+/**
+ * DeAlloc device memory.
+ * return value:
+ *   -1, failed
+ *    0, done
+ */
+DECL_EXPORT int bmvpu_enc_dma_buffer_deallocate(int vpu_core_idx, BmVpuEncDMABuffer *buf);
+
+/**
+ * Attach an externally allocated buffer
+ * return value:
+ *   -1, failed
+ *    0, done
+ */
+DECL_EXPORT int bmvpu_enc_dma_buffer_attach(int vpu_core_idx, uint64_t paddr, unsigned int size);
+
+/**
+ * Deattach an externally allocated buffer
+ * return value:
+ *   -1, failed
+ *    0, done
+ */
+DECL_EXPORT int bmvpu_enc_dma_buffer_deattach(int vpu_core_idx, uint64_t paddr, unsigned int size);
+
+
+/**
+ * Mmap operation
+ *
+ * return value:
+ *   -1, failed
+ *    0, done
+ */
+DECL_EXPORT int bmvpu_dma_buffer_map(int vpu_core_idx, BmVpuEncDMABuffer* buf, int port_flag);
+
+/**
+ * Munmap operation
+ *
+ * return value:
+ *   -1, failed
+ *    0, done
+ */
+DECL_EXPORT int bmvpu_dma_buffer_unmap(int vpu_core_idx, BmVpuEncDMABuffer* buf);
+
+/**
+ * flush operation
+ *
+ * return value:
+ *   -1, failed
+ *    0, done
+ */
+DECL_EXPORT int bmvpu_enc_dma_buffer_flush(int vpu_core_idx, BmVpuEncDMABuffer* buf);
+
+/**
+ * invalidate operation
+ *
+ * return value:
+ *   -1, failed
+ *    0, done
+ */
+DECL_EXPORT int bmvpu_enc_dma_buffer_invalidate(int vpu_core_idx, BmVpuEncDMABuffer* buf);
+
+DECL_EXPORT uint64_t bmvpu_enc_dma_buffer_get_physical_address(BmVpuEncDMABuffer* buf);
+DECL_EXPORT unsigned int bmvpu_enc_dma_buffer_get_size(BmVpuEncDMABuffer* buf);
+
+
+/******************************************************/
+/******* MISCELLANEOUS STRUCTURES AND FUNCTIONS *******/
+/******************************************************/
+
+
+/* Frame types understood by the VPU. */
+typedef enum
+{
+    BM_VPU_ENC_FRAME_TYPE_UNKNOWN = 0,
+    BM_VPU_ENC_FRAME_TYPE_I,
+    BM_VPU_ENC_FRAME_TYPE_P,
+    BM_VPU_ENC_FRAME_TYPE_B,
+    BM_VPU_ENC_FRAME_TYPE_IDR
+} BmVpuEncFrameType;
+
+
+/* Codec format to use for en/decoding. */
+typedef enum
+{
+    /* H.264.
+     * Encoding: Baseline/Constrained Baseline/Main/High/High 10 Profiles Level @ L5.2
+     */
+    BM_VPU_CODEC_FORMAT_H264,
+
+    /* H.265.
+     * Encoding: Supports Main/Main 10/Main Still Picture Profiles
+     *           @ L5.1 High-tier
+     */
+    BM_VPU_CODEC_FORMAT_H265,
+} BmVpuCodecFormat;
+
+/* BmVpuMappingFlags: flags for the BmVpuDMABufferAllocator's map function pointers
+ * These flags can be bitwise-OR combined, although READ and WRITE cannot
+ * both be set */
+typedef enum
+{
+    /* Map memory for CPU write access */
+    BM_VPU_ENC_MAPPING_FLAG_WRITE   = (1UL << 0),
+    /* Map memory for CPU read access */
+    BM_VPU_ENC_MAPPING_FLAG_READ    = (1UL << 1)
+} BmVpuEncMappingFlags;
+
+typedef enum
+{
+    BM_VPU_ENC_PIX_FORMAT_YUV420P = 0,   /* planar 4:2:0 chroma_interleave is 0;*/
+    BM_VPU_ENC_PIX_FORMAT_YUV422P = 1,   /* enc not support.*/
+    BM_VPU_ENC_PIX_FORMAT_YUV444P = 3,   /* enc not support.*/
+    BM_VPU_ENC_PIX_FORMAT_YUV400  = 4,   /* enc not support 8-bit greayscale */
+    BM_VPU_ENC_PIX_FORMAT_NV12    = 5,   /* planar 4:2:0 chroma_interleave is 1;*/
+    BM_VPU_ENC_PIX_FORMAT_NV21    = 8,   /* planar 4:2:0 chroma_interleave is 1;*/
+    BM_VPU_ENC_PIX_FORMAT_NV16    = 6,   /* enc not support.*/
+    BM_VPU_ENC_PIX_FORMAT_NV24    = 7,   /* enc not support.*/
+} BmVpuEncPixFormat;
+
+
+
+/* Framebuffers are frame containers, and are used both for en- and decoding. */
+typedef struct
+{
+    /* DMA buffer which contains the pixels. */
+    BmVpuEncDMABuffer *dma_buffer;
+
+    /* Make sure each framebuffer has an ID that is different
+     * to the IDs of each other */
+    int          myIndex;
+
+    /* Stride of the Y and of the Cb&Cr components.
+     * Specified in bytes. */
+    unsigned int y_stride;
+    unsigned int cbcr_stride; // TODO
+
+    unsigned int width;  /* width of frame buffer */
+    unsigned int height; /* height of frame buffer */
+
+    /* These define the starting offsets of each component
+     * relative to the start of the buffer. Specified in bytes. */
+    size_t y_offset;
+    size_t cb_offset;
+    size_t cr_offset;
+
+    /* Set to 1 if the framebuffer was already marked as used in encoder.
+     * This is for internal use only.
+     * Not to be read or written from the outside. */
+    int already_marked;
+
+    /* Internal, implementation-defined data. Do not modify. */
+    void *internal;
+
+    /* User-defined pointer.
+     * The library does not touch this value.
+     * This can be used for example to identify which framebuffer out of
+     * the initially allocated pool was used by the VPU to contain a frame.
+     */
+    void *context;
+} BmVpuFramebuffer;
+
+/* Structure containing details about encoded frames. */
+typedef struct
+{
+    /* When decoding, data must point to the memory block which contains
+     * encoded frame data that gets consumed by the VPU.
+     * Only used by the decoder. */
+    uint8_t *data;
+
+    /* Size of the encoded data, in bytes. When decoding, this is set by
+     * the user, and is the size of the encoded data that is pointed to
+     * by data. When encoding, the encoder sets this to the size of the
+     * acquired output block, in bytes (exactly the same value as the
+     * acquire_output_buffer's size argument). */
+    size_t data_size;
+    // size_t data_len;
+
+    /* Frame type (I, P, B, ..) of the encoded frame. Filled by the encoder.
+     * Only used by the encoder. */
+    BmVpuEncFrameType frame_type;
+
+    /* Handle produced by the user-defined acquire_output_buffer function
+     * during encoding.
+     * Only used by the encoder. */
+    void *acquired_handle;
+
+    /* User-defined pointer.
+     * The library does not touch this value.
+     * This pointer and the one from the corresponding raw frame will have
+     * the same value. The library will pass then through. */
+    void *context;
+
+    /* User-defined timestamps.
+     * In many cases, the context one wants to associate with raw/encoded frames
+     * is a PTS-DTS pair. Just like the context pointer, the library just passes
+     * them through to the associated raw frame, and does not actually touch
+     * their values. */
+    uint64_t pts;
+    uint64_t dts;
+
+    int src_idx;
+
+    // for roi index
+    bmvpu_phys_addr_t u64CustomMapPhyAddr;
+
+    int avg_ctu_qp;
+} BmVpuEncodedFrame;
+
+
+/* Structure containing details about raw, uncompressed frames. */
+typedef struct
+{
+    BmVpuFramebuffer *framebuffer;
+
+    /* User-defined pointer.
+     * The library does not touch this value.
+     * This pointer and the one from the corresponding encoded frame will have
+     * the same value. The library will pass then through. */
+    void *context;
+
+    /* User-defined timestamps.
+     * In many cases, the context one wants to associate with raw/encoded frames
+     * is a PTS-DTS pair. Just like the context pointer, the library just passes
+     * them through to the associated encoded frame, and does not actually touch
+     * their values. */
+    uint64_t pts;
+    uint64_t dts;
+} BmVpuRawFrame;
+
+typedef struct {
+    /* Frame width and height, aligned to the 16-pixel boundary required by the VPU. */
+    int width;
+    int height;
+
+    /* Stride sizes, in bytes, with alignment applied.
+     * The Cb and Cr planes always use the same stride. */
+    int y_stride; /* aligned stride */
+    int c_stride; /* aligned stride (optional) */
+
+    /* Required DMA memory size for the Y,Cb,Cr planes, in bytes.
+     * The Cb and Cr planes always are of the same size. */
+    int y_size;
+    int c_size;
+
+    /* Total required size of a framebuffer's DMA buffer, in bytes.
+     * This value includes the sizes of all planes. */
+    int size;
+} BmVpuFbInfo;
+
+
+
+
 
 /* Encoder return codes. With the exception of BM_VPU_ENC_RETURN_CODE_OK, these
  * should be considered hard errors, and the encoder should be closed when they
@@ -204,6 +557,27 @@ enum {
     BM_COMPRESSED_FRAME_MAP  = 10 /* Compressed frame map type */
 };
 
+/**
+ * @brief   This is a special enumeration type for defining GOP structure presets.
+ */
+typedef enum {
+    BM_VPU_ENC_GOP_PRESET_ALL_I  = 1, /**< All Intra, gopsize = 1 */
+    BM_VPU_ENC_GOP_PRESET_IPP    = 2, /**< Consecutive P, cyclic gopsize = 1 */
+    BM_VPU_ENC_GOP_PRESET_IBBB   = 3, /**< Consecutive B, cyclic gopsize = 1 */
+    BM_VPU_ENC_GOP_PRESET_IBPBP  = 4, /**< gopsize = 2 */
+    BM_VPU_ENC_GOP_PRESET_IBBBP  = 5, /**< gopsize = 4 */
+    BM_VPU_ENC_GOP_PRESET_IPPPP  = 6, /**< Consecutive P, cyclic gopsize = 4 */
+    BM_VPU_ENC_GOP_PRESET_IBBBB  = 7, /**< Consecutive B, cyclic gopsize = 4 */
+    BM_VPU_ENC_GOP_PRESET_RA_IB  = 8, /**< Random Access, cyclic gopsize = 8 */
+} BMVpuEncGopPreset;
+
+typedef enum {
+    BM_VPU_ENC_CUSTOM_MODE      = 0, // Custom mode,
+    BM_VPU_ENC_RECOMMENDED_MODE = 1, // recommended encoder parameters (slow encoding speed, highest picture quality)
+    BM_VPU_ENC_BOOST_MODE       = 2, // Boost mode (normal encoding speed, normal picture quality),
+    BM_VPU_ENC_FAST_MODE        = 3, // Fast mode (high encoding speed, low picture quality) */
+} BMVpuEncMode;
+
 /* h.264 parameters for the new encoder instance. */
 typedef struct
 {
@@ -250,11 +624,10 @@ typedef struct
 
     /* Color format to use for incoming frames.
      * Video codec formats only allow for the two formats
-     * BM_VPU_COLOR_FORMAT_YUV420 and BM_VPU_COLOR_FORMAT_YUV400 (the second
+     * BM_VPU_ENC_PIX_FORMAT_YUV420P and BM_VPU_COLOR_FORMAT_YUV400 (the second
      * one is supported by using YUV420 and dummy U and V planes internally).
-     * See the BmVpuColorFormat documentation for an explanation how
-     * the chroma_interleave value can affec the pixel format that is used. */
-    BmVpuColorFormat color_format;
+     * See the BmVpuEncPixFormat documentation. */
+    BmVpuEncPixFormat pix_format;
 
     /* Width and height of the incoming frames, in pixels. These
      * do not have to be aligned to any boundaries. */
@@ -289,7 +662,7 @@ typedef struct
      * 1 : recommended encoder parameters (slow encoding speed, highest picture quality)
      * 2 : Boost mode (normal encoding speed, normal picture quality),
      * 3 : Fast mode (high encoding speed, low picture quality) */
-    int enc_mode;
+    BMVpuEncMode enc_mode;
 
     /* The number of merge candidates in RDO(1 or 2).
      *  1: improve encoding performance.
@@ -331,10 +704,6 @@ typedef struct
         BmVpuEncH265Params h265_params;
     };
 
-    /* If this is 1, then Cb and Cr are interleaved in one shared chroma
-     * plane, otherwise they are separated in their own planes.
-     * See the BmVpuColorFormat documentation for the consequences of this. */
-    int chroma_interleave;
 
     /* only used for PCIE mode. For SOC mode, this must be 0.
      * Default value is 0. */
@@ -351,7 +720,7 @@ typedef struct
      * 8: Random Access, I-B-B-B-B-B-B-B-B, cyclic gopsize = 8
      * Low delay cases are 1, 2, 3, 6, 7.
      * Default value is 5. */
-    int gop_preset;
+    BMVpuEncGopPreset gop_preset;
 
     // TODO
     /* A period of intra picture in GOP size.
@@ -386,6 +755,13 @@ typedef struct
      * Default value is 4
      * the value must 1 <= value <= 4*/
     int cmd_queue_depth;
+
+    int timeout;
+    int timeout_count;
+
+    BmVpuEncBufferAllocFunc buffer_alloc_func;
+    BmVpuEncBufferFreeFunc buffer_free_func;
+    void *buffer_context;
 } BmVpuEncOpenParams;
 
 /* Initial encoding information, produced by the encoder. This structure is
@@ -401,6 +777,9 @@ typedef struct
 
     /* Physical framebuffer addresses must be aligned to this value. */
     uint32_t framebuffer_alignment;
+
+    /* frame buffer size for reconstruction */
+    BmVpuFbInfo rec_fb;
 
     /* frame buffer size for source */
     BmVpuFbInfo src_fb;
@@ -451,32 +830,12 @@ typedef struct {
      * coefficient drop flag, QPs, and lambdas like the below illustration.
      * image::../figure/wave520_ctumap.svg["Format of custom Map", width=300]
      */
-    bm_pa_t addrCustomMap;
-
-    // index nums
-    int index;
+    bmvpu_phys_addr_t addrCustomMap;
 } BmCustomMapOpt;
 
 
-/* Structure containing details about raw, uncompressed frames. */
 typedef struct
 {
-    BmVpuFramebuffer *framebuffer;
-
-    /* User-defined pointer.
-     * The library does not touch this value.
-     * This pointer and the one from the corresponding encoded frame will have
-     * the same value. The library will pass then through. */
-    void *context;
-
-    /* User-defined timestamps.
-     * In many cases, the context one wants to associate with raw/encoded frames
-     * is a PTS-DTS pair. Just like the context pointer, the library just passes
-     * them through to the associated encoded frame, and does not actually touch
-     * their values. */
-    uint64_t pts;
-    uint64_t dts;
-
     /* If set to 1, the VPU ignores the given source frame, and
      * instead generates a "skipped frame". If such a frame is
      * reconstructed, it is a duplicate of the preceding frame.
@@ -484,15 +843,24 @@ typedef struct
      * 0 disables skipped frame generation. Default value is 0. */
     int skip_frame;
 
-    /* User-defined ROI info*/
+    /* Functions for acquiring and finishing output buffers. See the
+     * typedef documentations above for details about how these
+     * functions should behave, and the bmvpu_enc_encode()
+     * documentation for how they are used. */
+    BmVpuEncAcquireOutputBuffer acquire_output_buffer;
+    BmVpuEncFinishOutputBuffer  finish_output_buffer;
+
+    /* User supplied value that will be passed to the functions */
+    void *output_buffer_context;
+
+    /* roi custom map info */
     BmCustomMapOpt* customMapOpt;
-} BmVpuRawFrame;
+} BmVpuEncParams;
 
 /* BM VPU Encoder structure. */
 typedef struct
 {
     void* handle;
-    bm_handle_t bm_handle;
 
     int soc_idx; /* The index of Sophon SoC.
                   * For PCIE mode, please refer to the number at /dev/bm-sophonxx.
@@ -500,7 +868,7 @@ typedef struct
     int core_idx; /* unified index for vpu encoder cores at all Sophon SoCs */
 
     BmVpuCodecFormat codec_format;
-    BmVpuColorFormat color_format;
+    BmVpuEncPixFormat pix_format;
 
     uint32_t frame_width;
     uint32_t frame_height;
@@ -508,53 +876,50 @@ typedef struct
     uint32_t fps_n;
     uint32_t fps_d;
 
-    int cbcr_interleave;
     int first_frame;
 
     int rc_enable;
     /* constant qp when rc is disabled */
     int cqp;
 
-    /* DMA buffer allocator */
-    // BmVpuDMABufferAllocator *dmabuffers_allocator; //Deprecated, now use bmlib
-
     /* DMA buffer for working */
-    bm_device_mem_t*   work_dmabuffer;
+    BmVpuEncDMABuffer*   work_dmabuffer;
 
     /* DMA buffer for bitstream */
-    bm_device_mem_t* bs_dmabuffer;
+    BmVpuEncDMABuffer* bs_dmabuffer;
 
     unsigned long long bs_virt_addr;
     bmvpu_phys_addr_t bs_phys_addr;
 
     /* DMA buffer for frame data */
     uint32_t      num_framebuffers;
-    // VpuFrameBuffer*   internal_framebuffers;
+    void * /*VpuFrameBuffer**/   internal_framebuffers;
     BmVpuFramebuffer* framebuffers;
 
     /* TODO change all as the parameters of bmvpu_enc_register_framebuffers() */
     /* DMA buffer for colMV */
-    bm_device_mem_t*   buffer_mv;
+    BmVpuEncDMABuffer*   buffer_mv;
 
     /* DMA buffer for FBC luma table */
-    bm_device_mem_t*   buffer_fbc_y_tbl;
+    BmVpuEncDMABuffer*   buffer_fbc_y_tbl;
 
     /* DMA buffer for FBC chroma table */
-    bm_device_mem_t*   buffer_fbc_c_tbl;
+    BmVpuEncDMABuffer*   buffer_fbc_c_tbl;
 
     /* Sum-sampled DMA buffer for ME */
-    bm_device_mem_t*   buffer_sub_sam;
+    BmVpuEncDMABuffer*   buffer_sub_sam;
 
     uint8_t* headers_rbsp;
     size_t   headers_rbsp_size;
 
     BmVpuEncInitialInfo initial_info;
+
+    int timeout;
+    int timeout_count;
+
+    /* internal use */
+    void *video_enc_ctx;
 } BmVpuEncoder;
-
-
-/* Returns a human-readable description of the error code.
- * Useful for logging. */
-DECL_EXPORT void bmvpu_enc_set_logging_threshold(BmVpuEncLogLevel threshold);
 
 /* Returns a human-readable description of the error code.
  * Useful for logging. */
@@ -575,13 +940,6 @@ DECL_EXPORT int bmvpu_enc_unload(int soc_idx);
 
 DECL_EXPORT int bmvpu_get_ext_addr();
 
-/*
- * If a bm_handle_t on this soc already exists, return it directly,
- * otherwise return NULL. This function should be called after bmvpu_enc_load()
- * is called, otherwise it is possibily that there is not bm_handle_t on that soc.
- */
-DECL_EXPORT bm_handle_t bmvpu_enc_get_bmlib_handle(int soc_idx);
-
 /* Called before bmvpu_enc_open(), it returns the alignment and size for the
  * physical memory block necessary for the encoder's bitstream buffer.
  * The user must allocate a DMA buffer of at least this size, and its physical
@@ -593,19 +951,24 @@ DECL_EXPORT void bmvpu_enc_get_bitstream_buffer_info(size_t *size, uint32_t *ali
 DECL_EXPORT void bmvpu_enc_set_default_open_params(BmVpuEncOpenParams *open_params, BmVpuCodecFormat codec_format);
 
 
-DECL_EXPORT int bmvpu_enc_param_parse(BmVpuEncOpenParams *p, const char *name, const char *value);
+/**
+ * Fill fields of the BmVpuFramebuffer structure, based on data from "fb_info".
+ * The specified DMA buffer and context pointer are also set.
+ */
+DECL_EXPORT int bmvpu_fill_framebuffer_params(BmVpuFramebuffer *framebuffer,
+                                   BmVpuFbInfo *fb_info,
+                                   BmVpuEncDMABuffer *fb_dma_buffer,
+                                   int fb_id, void* context);
+
 
 /* Opens a new encoder instance.
  * "open_params" and "bs_dmabuffer" must not be NULL. */
-DECL_EXPORT int bmvpu_enc_open(BmVpuEncoder **encoder, BmVpuEncOpenParams *open_params);
+DECL_EXPORT int bmvpu_enc_open(BmVpuEncoder **encoder, BmVpuEncOpenParams *open_params,
+                            BmVpuEncDMABuffer *bs_dmabuffer, BmVpuEncInitialInfo *initial_info);
 
 /* Closes a encoder instance.
  * Trying to close the same instance multiple times results in undefined behavior. */
 DECL_EXPORT int bmvpu_enc_close(BmVpuEncoder *encoder);
-
-/* Retrieves initial information available after calling bmvpu_enc_open().
- * Internally this also generates stream headers. */
-DECL_EXPORT int bmvpu_enc_get_initial_info(BmVpuEncoder *encoder, BmVpuEncInitialInfo *info);
 
 /* Encodes a given raw input frame with the given encoding parameters.
  * encoded_frame is filled with information about the resulting encoded output frame.
@@ -648,23 +1011,37 @@ DECL_EXPORT int bmvpu_enc_get_initial_info(BmVpuEncoder *encoder, BmVpuEncInitia
  * combination of the codes in BmVpuEncOutputCodes.
  *
  * None of the arguments may be NULL. */
-DECL_EXPORT int bmvpu_enc_encode_header(BmVpuEncoder *encoder, 
-                        uint8_t* header_buf, int* header_len);
 
 DECL_EXPORT int bmvpu_enc_send_frame(BmVpuEncoder *encoder,
                      BmVpuRawFrame const *raw_frame,
-                     bool isframe_end);
-
+                     BmVpuEncParams *encoding_params);
 
 DECL_EXPORT int bmvpu_enc_get_stream(BmVpuEncoder *encoder,
-                     BmVpuEncodedFrame *encoded_frame);
+                     BmVpuEncodedFrame *encoded_frame,
+                     BmVpuEncParams *encoding_params);
 
 
 
 DECL_EXPORT int bmvpu_enc_encode(BmVpuEncoder *encoder,
                      BmVpuRawFrame const *raw_frame,
                      BmVpuEncodedFrame *encoded_frame,
-                     bool isframe_end);
+                     BmVpuEncParams *encoding_params,
+                     uint32_t *output_code);
+
+
+/**
+ * Returns a human-readable description of the given color format.
+ * Useful for logging.
+ */
+char const *bmvpu_pix_format_string(BmVpuEncPixFormat pix_format);
+
+/**
+ * Returns a human-readable description of the given frame type.
+ * Useful for logging.
+ */
+char const *bmvpu_frame_type_string(BmVpuEncFrameType frame_type);
+
+
 /**
  * Parse the parameters in string
  *
@@ -675,8 +1052,6 @@ DECL_EXPORT int bmvpu_enc_encode(BmVpuEncoder *encoder,
 DECL_EXPORT int bmvpu_enc_param_parse(BmVpuEncOpenParams *p, const char *name, const char *value);
 
 
-DECL_EXPORT int bmvpu_enc_ioctl_mmap(BmVpuEncoder *encoder, unsigned long addr, unsigned int size, unsigned long long *va);
-DECL_EXPORT int bmvpu_enc_ioctl_unmmap(unsigned long long *va, unsigned int size);
 
 
 #ifdef __cplusplus

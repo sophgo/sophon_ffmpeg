@@ -45,7 +45,7 @@
 #include "avdevice.h"
 #include "timefilter.h"
 #include "v4l2-common.h"
-#include "linux/vi_uapi.h"
+#include "linux/vi_v4l2_uapi.h"
 #include "cvi_isp_v4l2.h"
 #include <dirent.h>
 #include "bmlib_runtime.h"
@@ -54,7 +54,6 @@
 #if CONFIG_LIBV4L2
 #include <libv4l2.h>
 #endif
-
 
 #define V4L_ALLFORMATS  3
 #define V4L_RAWFORMATS  1
@@ -105,9 +104,10 @@ struct video_data {
     int list_format;    /**< Set by a private option. */
     int list_standard;  /**< Set by a private option. */
     char *framerate;    /**< Set by a private option. */
-    int use_isp_chn_num;
+    int use_isp;
     int wdr_on;
     int v4l2_buffer_num;
+    int dev_num;
     bm_handle_t bm_handle;
 
     int use_libv4l2;
@@ -142,6 +142,40 @@ struct buff_data {
     struct buffer_info *buf_info;
     int index;
 };
+
+
+static int get_dev_num(AVFormatContext *ctx, int fd) {
+    struct video_data *s = ctx->priv_data;
+    struct v4l2_ext_controls val;
+    struct v4l2_ext_control control;
+    int err;
+
+    memset(&val, 0, sizeof(struct v4l2_ext_controls));
+
+    uint16_t *dev_num;
+    dev_num = (uint16_t *)malloc(sizeof(uint16_t));
+    if(fd > 0) {
+        control.id = VI_IOCTL_GET_LINK_NUM;
+        control.ptr = dev_num;
+        val.count = 1;
+        val.controls = &control;
+        if(ioctl(fd, VIDIOC_G_EXT_CTRLS, &val) < 0) {
+            err = AVERROR(errno);
+            av_log(ctx, AV_LOG_ERROR, "ioctl(VIDIOC_G_EXT_CTRLS): %s\n",
+                av_err2str(err));
+            free(dev_num);
+            return err;
+        } else {
+            av_log(NULL, AV_LOG_INFO,"get dev num = %d\n", *dev_num);
+            s->dev_num = *dev_num;
+        }
+    }
+
+    free(dev_num);
+
+    return 0;
+}
+
 
 static int device_open(AVFormatContext *ctx, const char* device_path)
 {
@@ -201,6 +235,12 @@ static int device_open(AVFormatContext *ctx, const char* device_path)
 
     av_log(ctx, AV_LOG_VERBOSE, "fd:%d capabilities:%x\n",
            fd, cap.capabilities);
+
+    if(!s->dev_num) {//if not set dev_num get the sensor num
+        if ((err = get_dev_num(ctx, fd)) < 0) {
+            goto fail;
+        }
+    }
 
     if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE)) {
         av_log(ctx, AV_LOG_ERROR, "Not a video capture device.\n");
@@ -643,7 +683,7 @@ static int mmap_read_frame(AVFormatContext *ctx, AVPacket *pkt)
     }
     atomic_fetch_add(&s->buffers_queued, -1);
     // always keep at least one buffer queued
-    av_assert0(atomic_load(&s->buffers_queued) >= 1);
+    // av_assert0(atomic_load(&s->buffers_queued) >= 1);
 
 #ifdef V4L2_BUF_FLAG_ERROR
     if (buf.flags & V4L2_BUF_FLAG_ERROR) {
@@ -668,7 +708,7 @@ static int mmap_read_frame(AVFormatContext *ctx, AVPacket *pkt)
     }
 
     /* Image is at s->buff_start[buf.index] */
-    if (atomic_load(&s->buffers_queued) == FFMAX(s->buffers / 8, 1)) {
+    if (atomic_load(&s->buffers_queued) == FFMAX(s->buffers / 8, 1) && 0) { //not support copy
         /* when we start getting low on queued buffers, fall back on copying data */
         struct buffer_info *buf_info;
         struct buff_data *buf_descriptor;
@@ -790,7 +830,6 @@ static int mmap_start(AVFormatContext *ctx)
     enum v4l2_buf_type type;
     int i, res;
 	static int isp_init_time;
-	static int set_wdr_on_time;
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     ts.tv_sec += 5;
@@ -811,34 +850,12 @@ static int mmap_start(AVFormatContext *ctx)
     }
     atomic_store(&s->buffers_queued, s->buffers);
 
-    //set hdr on or off,only supprot first dev now
-	if (s->wdr_on) {
-		if (s->channel == 0) {
-			set_wdr_on(s->fd, 1);
-		} else {
-			set_wdr_on(s->fd, 0);
-		}
-		pthread_mutex_lock(&wdr_mutex);
-
-		set_wdr_on_time++;
-		if (set_wdr_on_time == s->use_isp_chn_num) {
-			pthread_cond_broadcast(&wdr_cond);
-		} else {
-			int wait_res = pthread_cond_timedwait(&wdr_cond, &wdr_mutex, &ts);
-			if (wait_res == ETIMEDOUT) {
-				av_log(ctx, AV_LOG_ERROR, "WDR set init timeout!\n");
-			}
-		}
-		pthread_mutex_unlock(&wdr_mutex);
-	}
-
-
-    if(s->use_isp_chn_num) {
+    if (s->use_isp) {
         CVI_ISP_V4L2_Init(s->channel,s->fd);
         pthread_mutex_lock(&isp_mutex);
         isp_init_time++;
 
-        if (isp_init_time == s->use_isp_chn_num) {
+        if (isp_init_time == s->dev_num) {
             pthread_cond_broadcast(&isp_cond);
         } else {
             int wait_res = pthread_cond_timedwait(&isp_cond, &isp_mutex, &ts);
@@ -880,7 +897,7 @@ static void mmap_close(struct video_data *s)
         v4l2_munmap(s->buf_start[i], s->buf_len[i]);
     }
 
-    if(s->use_isp_chn_num)
+    if(s->use_isp)
         CVI_ISP_V4L2_Exit(s->channel);
     av_freep(&s->buf_start);
     av_freep(&s->buf_len);
@@ -894,6 +911,10 @@ static int v4l2_set_parameters(AVFormatContext *ctx)
     struct v4l2_streamparm streamparm = { 0 };
     struct v4l2_fract *tpf;
     AVRational framerate_q = { 0 };
+    static int set_wdr_on_time;
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += 5;
     int i, ret;
 
     if (s->framerate &&
@@ -902,6 +923,23 @@ static int v4l2_set_parameters(AVFormatContext *ctx)
                s->framerate);
         return ret;
     }
+
+    if (s->wdr_on) {
+        set_wdr_on(s->fd, 1);
+    } else {
+        set_wdr_on(s->fd, 0);
+    }
+    pthread_mutex_lock(&wdr_mutex);
+    set_wdr_on_time++;
+    if (set_wdr_on_time == s->dev_num) {
+        pthread_cond_broadcast(&wdr_cond);
+    } else {
+        int wait_res = pthread_cond_timedwait(&wdr_cond, &wdr_mutex, &ts);
+        if (wait_res == ETIMEDOUT) {
+            av_log(ctx, AV_LOG_ERROR, "WDR set init timeout!\n");
+        }
+    }
+    pthread_mutex_unlock(&wdr_mutex);
 
     if (s->standard) {
         if (s->std_id) {
@@ -966,33 +1004,15 @@ static int v4l2_set_parameters(AVFormatContext *ctx)
     if (v4l2_ioctl(s->fd, VIDIOC_G_PARM, &streamparm) < 0) {
         ret = AVERROR(errno);
         av_log(ctx, AV_LOG_WARNING, "ioctl(VIDIOC_G_PARM): %s\n", av_err2str(ret));
-    } else if (framerate_q.num && framerate_q.den) {
+    } else { //VIDIOC_S_PARM is not support now
         if (streamparm.parm.capture.capability & V4L2_CAP_TIMEPERFRAME) {
             tpf = &streamparm.parm.capture.timeperframe;
 
-            av_log(ctx, AV_LOG_DEBUG, "Setting time per frame to %d/%d\n",
+            framerate_q.den  = tpf->numerator;
+            framerate_q.num  = tpf->denominator;
+
+            av_log(ctx, AV_LOG_DEBUG, "Reading time per frame to %d/%d\n",
                    framerate_q.den, framerate_q.num);
-            tpf->numerator   = framerate_q.den;
-            tpf->denominator = framerate_q.num;
-
-            if (v4l2_ioctl(s->fd, VIDIOC_S_PARM, &streamparm) < 0) {
-                ret = AVERROR(errno);
-                av_log(ctx, AV_LOG_ERROR, "ioctl(VIDIOC_S_PARM): %s\n",
-                       av_err2str(ret));
-                return ret;
-            }
-
-            if (framerate_q.num != tpf->denominator ||
-                framerate_q.den != tpf->numerator) {
-                av_log(ctx, AV_LOG_INFO,
-                       "The driver changed the time per frame from "
-                       "%d/%d to %d/%d\n",
-                       framerate_q.den, framerate_q.num,
-                       tpf->numerator, tpf->denominator);
-            }
-        } else {
-            av_log(ctx, AV_LOG_WARNING,
-                   "The driver does not permit changing the time per frame\n");
         }
     }
     if (tpf->denominator > 0 && tpf->numerator > 0) {
@@ -1166,6 +1186,22 @@ static int v4l2_read_header(AVFormatContext *ctx)
         s->height = fmt.fmt.pix.height;
         av_log(ctx, AV_LOG_VERBOSE,
                "Setting frame size to %dx%d\n", s->width, s->height);
+    }
+
+    if (pix_fmt == AV_PIX_FMT_NONE) {
+        struct v4l2_format fmt = { .type = V4L2_BUF_TYPE_VIDEO_CAPTURE };
+        codec_id = AV_CODEC_ID_RAWVIDEO;
+
+        av_log(ctx, AV_LOG_VERBOSE,
+               "Querying the device for the current pix fmt\n");
+        if (v4l2_ioctl(s->fd, VIDIOC_G_FMT, &fmt) < 0) {
+            res = AVERROR(errno);
+            av_log(ctx, AV_LOG_ERROR, "ioctl(VIDIOC_G_FMT): %s\n",
+                   av_err2str(res));
+            goto fail;
+        }
+
+        pix_fmt =  ff_fmt_v4l2ff(fmt.fmt.pix.pixelformat, codec_id);
     }
 
     res = device_try_init(ctx, pix_fmt, &s->width, &s->height, &desired_format, &codec_id);
@@ -1354,9 +1390,10 @@ static const AVOption options[] = {
     { "abs",          "use absolute timestamps (wall clock)",                     OFFSET(ts_mode),      AV_OPT_TYPE_CONST,  {.i64 = V4L_TS_ABS      }, 0, 2, DEC, "timestamps" },
     { "mono2abs",     "force conversion from monotonic to absolute timestamps",   OFFSET(ts_mode),      AV_OPT_TYPE_CONST,  {.i64 = V4L_TS_MONO2ABS }, 0, 2, DEC, "timestamps" },
     { "use_libv4l2",  "use libv4l2 (v4l-utils) conversion functions",             OFFSET(use_libv4l2),  AV_OPT_TYPE_BOOL,   {.i64 = 0}, 0, 1, DEC },
-    { "use_isp_chn_num", "use isp channel number",                                OFFSET(use_isp_chn_num), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 6, DEC },
-    { "wdr_on",        "set sensor wdr mode",                                     OFFSET(wdr_on),       AV_OPT_TYPE_INT,    {.i64 = 0}, 0, 1, DEC },
+    { "use_isp",      "use isp channel number",                                   OFFSET(use_isp),      AV_OPT_TYPE_INT,    {.i64 = 1}, 0, 1, DEC },
+    { "wdr_on",        "set sensor wdr mode",                                     OFFSET(wdr_on),          AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, DEC },
     { "v4l2_buffer_num", "video buffer num",                                      OFFSET(v4l2_buffer_num), AV_OPT_TYPE_INT, {.i64 = 8}, 0, 32, DEC },
+    { "dev_num",       "device number",                                           OFFSET(dev_num),         AV_OPT_TYPE_INT, {.i64 = 0}, 0, 6, DEC },
     { NULL },
 };
 

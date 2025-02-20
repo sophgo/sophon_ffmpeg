@@ -72,6 +72,65 @@ static struct ColorSapce2CSCMap g_csc_map[] = {
         {AVCOL_SPC_SMPTE240M, AVCOL_RANGE_JPEG, CSC_YPbPr2RGB_BT601, CSC_RGB2YPbPr_BT601},
 };
 
+static int bmvpu_malloc_device_byte_heap(AVHWDeviceContext *ctx, bm_handle_t bm_handle,
+                      bm_device_mem_t *pmem, unsigned int size,
+                      int heap_id_mask, int high_bit_first)
+{
+    int ret = 0;
+    int i = 0;
+    int heap_num = 0;
+    ret = bm_get_gmem_total_heap_num(bm_handle, &heap_num);
+    if (ret != 0)
+    {
+        av_log(ctx, AV_LOG_ERROR, "bmvpu_malloc_device_byte_heap failed!\n");
+        return -1;
+    }
+
+    int available_heap_mask = 0;
+    for (i=0; i<heap_num; i++){
+        available_heap_mask = available_heap_mask | (0x1 << i);
+    }
+
+    int enable_heap_mask = available_heap_mask & heap_id_mask;
+    if (enable_heap_mask == 0x0)
+    {
+        av_log(ctx, AV_LOG_ERROR, "bmvpu_malloc_device_byte_heap failed(heap_mask is 0x0)!\n");
+        return -1;
+    }
+    if (high_bit_first)
+    {
+        for (i=(heap_num-1); i>=0; i--)
+        {
+            if ((enable_heap_mask & (0x1<<i)))
+            {
+                ret = bm_malloc_device_byte_heap(bm_handle, pmem, i, size);
+                if (ret != 0)
+                {
+                    av_log(ctx, AV_LOG_ERROR, "bm_malloc_device_byte_heap failed! size(%d)\n", size);
+                }
+                return ret;
+            }
+        }
+    }
+    else
+    {
+        for (i=0; i<heap_num; i++)
+        {
+            if ((enable_heap_mask & (0x1<<i)))
+            {
+                ret = bm_malloc_device_byte_heap(bm_handle, pmem, i, size);
+                if (ret != 0)
+                {
+                    av_log(ctx, AV_LOG_ERROR, "bm_malloc_device_byte_heap failed! size(%d)\n", size);
+                }
+                return ret;
+            }
+        }
+    }
+
+    return BM_VPU_ENC_RETURN_CODE_OK;
+}
+
 static int bmcv_get_csc_type_by_colorinfo(int color_space, int color_range, int infmt, int outfmt, csc_type_t *p_csc_type)
 {
     int ret = 0;
@@ -481,7 +540,7 @@ static struct bmscale_avbuffer_ctx_s* bmscale_buffer_pool_alloc(BmScaleContext *
 
     hwpic->handle = handle;
 
-    ret = bmvpu_malloc_device_byte_heap(handle, hwpic->ion_buff, total_buffer_size, HEAP_MASK_1_2, 1);
+    ret = bmvpu_malloc_device_byte_heap(ctx, handle, hwpic->ion_buff, total_buffer_size, HEAP_MASK_1_2, 1);
     if(ret != BM_SUCCESS)
     {
         av_log(NULL, AV_LOG_ERROR, "[%s, %d] bmvpu_malloc_device_byte_heap() failed!\n", __FILE__, __LINE__);
