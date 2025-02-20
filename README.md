@@ -21,7 +21,15 @@ With officical FFMpeg, following changes are done in this project.
 
 download toolchain from linaro gnu toolchain
 ```base
-wget https://releases.linaro.org/components/toolchain/gcc-linaro/6.3-2017.05/gcc-linaro-6.3-2017.05.tar.xz
+https://github.com/sophgo/host-tools
+```
+When the SDK version is lower than SDK1.8, the toolchain path is
+```base
+host-tools/gcc/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu
+```
+When the SDK version is SDK1.8, the toolchain path is
+```base
+host-tools/gcc/gcc-buildroot-9.3.0-aarch64-linux-gnu
 ```
 
 ```bash
