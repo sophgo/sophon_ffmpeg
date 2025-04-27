@@ -1,11 +1,11 @@
 prefix=../prebuilt
 exec_prefix=${prefix}
 libdir=${exec_prefix}/lib
-includedir=${prefix}/include
+includedir=${prefix}/include/x264
 
 Name: x264
 Description: H.264 (MPEG4 AVC) encoder library
 Version: 0.149.2802 8c29742
 Libs: -L${exec_prefix}/lib -lx264 -lpthread -lm -ldl
 Libs.private: 
-Cflags: -I${prefix}/include
+Cflags: -I${prefix}/include/x264

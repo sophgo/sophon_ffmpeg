@@ -2,7 +2,7 @@ prefix=../prebuilt
 exec_prefix=${prefix}
 libdir=${exec_prefix}/lib
 sharedlibdir=${libdir}
-includedir=${prefix}/include
+includedir=${prefix}/include/zlib
 
 Name: zlib
 Description: zlib compression library

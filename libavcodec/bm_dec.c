@@ -493,7 +493,10 @@ static av_cold int bm_decode_init(AVCodecContext *avctx)
     ret = bmvpu_dec_create(&handle, param);
     if (ret != 0) {
         av_log(avctx, AV_LOG_ERROR, "bmvpu_dec_create failed\n");
-        ret = AVERROR_INVALIDDATA;
+        if(ret == BM_ERR_VDEC_NOMEM)
+            ret = AVERROR(ENOMEM);
+        else
+            ret = AVERROR_INVALIDDATA;
     }
     bmctx->handle = handle;
     bmctx->endof_flag = 0;
@@ -1433,6 +1436,9 @@ static int bm_decode_internal(AVCodecContext *avctx, void *outdata, int *outdata
         if(ret == BM_ERR_VDEC_ERR_HUNG) {
             ret = AVERROR_EXTERNAL;
         }
+        else if(ret == BM_ERR_VDEC_NOMEM) {
+            ret = AVERROR(ENOMEM);
+        }
         return ret;
     }
 #if 0
@@ -1455,6 +1461,8 @@ static int bm_decode_internal(AVCodecContext *avctx, void *outdata, int *outdata
             av_log(avctx, AV_LOG_ERROR, "bmvpu_dec_get_output timeout. dec_status:%d endof_flag=%d pkg:%d\n", bmvpu_dec_get_status(handle), bmctx->endof_flag, bmvpu_dec_get_pkt_in_buf_cnt(handle));
         }
 
+        if(status == BMDEC_FRAMEBUFFER_NOTENOUGH)
+            break;
         av_usleep(USLEEP_CLOCK);
     }
 
@@ -1462,7 +1470,9 @@ static int bm_decode_internal(AVCodecContext *avctx, void *outdata, int *outdata
         *outdata_size = 0;
         //frame->flags = frame->flags | AV_FRAME_FLAG_DISCARD;
         free(bmframe);
-        if(status == BMDEC_HUNG)
+        if(status == BMDEC_FRAMEBUFFER_NOTENOUGH)
+            return AVERROR(ENOMEM);
+        else if(status == BMDEC_HUNG)
             return AVERROR_EXTERNAL;
 
         if(bmctx->endof_flag > 0) {
