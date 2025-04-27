@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
+#include <pthread.h>
 
 #include "libavutil/avstring.h"
 #include "libavutil/common.h"
@@ -229,6 +230,7 @@ typedef struct BmScaleContext {
     int is_bmvpp_inited;
     int zero_copy;
     int stride_align;
+    pthread_rwlock_t list_rwlock;
     struct list_head freed_avbuffer_list;
     struct list_head module_entry;
 
@@ -239,6 +241,7 @@ typedef struct BmScaleContext {
 #define BMVPP_MAX_CONVERT_STAGE_NUM 8
 #define BMVPP_ALLOC(type, n) (type*)av_mallocz(sizeof(type)*(n))
 
+static pthread_rwlock_t g_module_list_lock = PTHREAD_RWLOCK_INITIALIZER;
 static LIST_HEAD(g_module_list);
 
 typedef int (*bmscale_csc_func_t)(int is_compressed, bm_image *s, bmcv_rect_t *crop, bm_image *d, int x, int y, int size_method);
@@ -408,15 +411,21 @@ static void bmscale_avbuffer_recycle(void *ctx, uint8_t *data)
     int found = 0;
     struct bmscale_avbuffer_ctx_s *avbuffer_ctx = (struct bmscale_avbuffer_ctx_s*)ctx;
     struct BmScaleContext* s;
+
+    pthread_rwlock_rdlock(&g_module_list_lock);
     list_for_each_entry(s, &g_module_list, module_entry, struct BmScaleContext) {
         if (s == avbuffer_ctx->ctx) {
             found = 1;
             break;
         }
     }
+    pthread_rwlock_unlock(&g_module_list_lock);
+
     //recycle it, not really free.
     if (found) {
+        pthread_rwlock_wrlock(&avbuffer_ctx->ctx->list_rwlock);
         list_add(&avbuffer_ctx->entry, &avbuffer_ctx->ctx->freed_avbuffer_list);
+        pthread_rwlock_unlock(&avbuffer_ctx->ctx->list_rwlock);
     }else{
         avbuffer_ctx->ctx = NULL;
         bmscale_avbuffer_release(avbuffer_ctx);
@@ -454,16 +463,20 @@ static struct bmscale_avbuffer_ctx_s* bmscale_buffer_pool_alloc(BmScaleContext *
     int total_buffer_size = 0;
     bm_handle_t handle;
 
+    pthread_rwlock_rdlock(&ctx->list_rwlock);
     list_for_each_entry(hwpic, &ctx->freed_avbuffer_list, entry, struct bmscale_avbuffer_ctx_s) {
         if (hwpic->format == format && hwpic->width == width && hwpic->height == height) {
             found = 1;
             break;
         }
     }
+    pthread_rwlock_unlock(&ctx->list_rwlock);
 
     if (found) {
         // detach from free chain list.
+        pthread_rwlock_wrlock(&ctx->list_rwlock);
         list_del(&hwpic->entry);
+        pthread_rwlock_unlock(&ctx->list_rwlock);
         return hwpic;
     }
 
@@ -634,10 +647,14 @@ static int bmscale_init(AVFilterContext *ctx)
 
     s->is_bmvpp_inited = 0;
     list_init(&s->freed_avbuffer_list);
+    pthread_rwlock_init(&s->list_rwlock, NULL);
     // qsort(g_convert_table, FF_ARRAY_ELEMS(g_convert_table), sizeof(g_convert_table[0]), bmscale_csc_table_key_compare);
 
     list_init(&s->module_entry);
-    list_add(&g_module_list, &s->module_entry);
+
+    pthread_rwlock_wrlock(&g_module_list_lock);
+    list_add(&s->module_entry, &g_module_list);
+    pthread_rwlock_unlock(&g_module_list_lock);
 
     ret = bm_dev_request(&handle, s->soc_idx);
     if (ret != BM_SUCCESS) {
@@ -671,7 +688,9 @@ static void bmscale_uninit(AVFilterContext *ctx)
         }
     }
 
+    pthread_rwlock_wrlock(&g_module_list_lock);
     list_del(&s->module_entry);
+    pthread_rwlock_unlock(&g_module_list_lock);
 
     if (s->is_bmvpp_inited) {
         bm_dev_free(s->handle);
@@ -680,10 +699,13 @@ static void bmscale_uninit(AVFilterContext *ctx)
 
     {
         struct bmscale_avbuffer_ctx_s *pos, *n;
+        pthread_rwlock_wrlock(&s->list_rwlock);
         list_for_each_entry_safe(pos, n, &s->freed_avbuffer_list, entry, struct bmscale_avbuffer_ctx_s) {
             bmscale_avbuffer_release(pos);
         }
+        pthread_rwlock_unlock(&s->list_rwlock);
     }
+    pthread_rwlock_destroy(&s->list_rwlock);
 
     av_frame_free(&s->frame);
     av_frame_free(&s->tmp_frame);
