@@ -1027,6 +1027,7 @@ fail2:
         av_log(avctx, AV_LOG_ERROR, "Failed to release output buffer\n");
         ret = AVERROR_EXTERNAL;
     }
+    free(bmframe);
 
     av_log(avctx, AV_LOG_TRACE, "[%s,%d] leave\n", __func__, __LINE__);
 

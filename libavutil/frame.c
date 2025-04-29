@@ -757,9 +757,16 @@ static int frame_copy_video(AVFrame *dst, const AVFrame *src)
             return AVERROR(EINVAL);
 
     memcpy(src_data, src->data, sizeof(src_data));
+
     av_image_copy(dst->data, dst->linesize,
                   src_data, src->linesize,
                   dst->format, src->width, src->height);
+
+    for(i=4; i<8; i++)
+    {
+        dst->data[i] = src->data[i];
+        dst->linesize[i] = src->linesize[i];
+    }
 
     return 0;
 }
