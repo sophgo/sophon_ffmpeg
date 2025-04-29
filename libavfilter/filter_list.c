@@ -213,6 +213,7 @@ static const AVFilter * const filter_list[] = {
     &ff_vf_null,
     &ff_vf_oscilloscope,
     &ff_vf_overlay,
+    &ff_vf_overlay_bm,
     &ff_vf_pad,
     &ff_vf_palettegen,
     &ff_vf_paletteuse,

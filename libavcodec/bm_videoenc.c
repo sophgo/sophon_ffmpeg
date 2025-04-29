@@ -591,7 +591,6 @@ static av_cold int bm_videoenc_init(AVCodecContext *avctx)
     if (ctx->hw_accel)
         av_log(avctx, AV_LOG_INFO,  "sw_pix_fmt   : %s\n", av_get_pix_fmt_name(avctx->sw_pix_fmt));
     av_log(avctx, AV_LOG_DEBUG, "gop size     : %d\n", avctx->gop_size);
-
     av_log(avctx, AV_LOG_INFO,  "sophon device: %d\n", ctx->soc_idx);
     av_log(avctx, AV_LOG_DEBUG, "preset       : %d\n", ctx->preset);
     av_log(avctx, AV_LOG_DEBUG, "gop preset   : %d\n", ctx->gop_preset);
@@ -962,7 +961,6 @@ static av_cold int bm_videoenc_close(AVCodecContext *avctx)
         }else
             ctx->soc_idx = -1;
     }
-
     av_log(avctx, AV_LOG_TRACE, "Leave %s\n", __func__);
 
     return 0;
@@ -1080,6 +1078,25 @@ static int SetMapData(AVCodecContext *avctx, BmCustomMapOpt **roi_map, int picWi
     }
 
     return 0;
+}
+/*
+    Refresh IDR immediately
+    v1: make a random num,odd is request immediately,even is not
+    TODO: wait cmd to request
+*/
+
+static void requestIDR(BmVpuEncContext* ctx)
+{
+    ctx->enc_params.forcePicTypeEnable = 1;
+    ctx->enc_params.forcePicType = 3;
+    av_log(ctx,AV_LOG_TRACE,"Refresh IDR Frame,done \n",ctx->total_frame);
+}
+
+static void restoreIDR(AVCodecContext *avctx){
+
+    BmVpuEncContext* ctx = (BmVpuEncContext *)(avctx->priv_data);
+    ctx->enc_params.forcePicTypeEnable = 0;
+    ctx->enc_params.forcePicType = 0;
 }
 
 static int bm_videoenc_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
@@ -1358,6 +1375,16 @@ static int bm_videoenc_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
 
         ctx->enc_params.skip_frame = 0; // TODO
 
+        if(frame->pict_type == AV_PICTURE_TYPE_I ){
+            if (avctx->codec_id == AV_CODEC_ID_H264){ //only support 264
+                requestIDR(ctx);// refresh the IDR immediately
+                av_log(avctx,AV_LOG_TRACE,"frame %ld will be changed to IDR!\n",ctx->total_frame);
+            } else {
+                 av_log(avctx,AV_LOG_DEBUG,"H265 don't support IDR Refresh!\n");
+            }
+
+        }
+
         ctx->input_frame.framebuffer = ctx->src_fb;
         if (ctx->zero_copy)
             ctx->input_frame.context = pic;
@@ -1488,10 +1515,10 @@ static int bm_videoenc_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
         /* output the encoded frame. */
         *got_packet = 1;
 
-        if (ctx->perf)
-            ctx->total_frame++;
     }
 
+    restoreIDR(avctx); // restore the settings
+    ctx->total_frame++;
     if (ctx->perf) {
         struct timeval pe;
         gettimeofday(&pe, NULL);

@@ -51,6 +51,7 @@
 #include "bm_vpuenc_interface.h"
 
 #define HEAP_MASK_1_2 0x06
+#define BMCV_INTER_LINEAR_FFMPEG 3
 
 static int bmscale_avimage_fill_arrays(uint8_t *dst_data[4], int dst_linesize[4], const uint8_t *src, enum AVPixelFormat pix_fmt, int width, int height, int align);
 static int bmscale_avimage_get_buffer_size(enum AVPixelFormat pix_fmt, int width, int height, int align);
@@ -128,6 +129,28 @@ static int bmvpp_scale_bmcv(bm_handle_t handle, bm_image src,
     padding_attr.padding_r = 0;
     padding_attr.if_memset = 0;
     int num = 1;
+    float scale_w = (float)loca->crop_w / (float)padding_attr.dst_crop_w;
+    float scale_h = (float)loca->crop_h / (float)padding_attr.dst_crop_h;
+    if(resize_method == BMCV_INTER_LINEAR_FFMPEG) {
+        if(scale_w <= 2 && scale_h <= 2)
+            resize_method = BMCV_INTER_LINEAR;
+        else{
+            int before_w = padding_attr.dst_crop_w * 2 > loca->crop_w ? loca->crop_w : padding_attr.dst_crop_w * 2;
+            int before_h = padding_attr.dst_crop_h * 2 > loca->crop_h ? loca->crop_h : padding_attr.dst_crop_h * 2;
+            bm_image before_img;
+            bm_image_create(handle, before_h, before_w, dst->image_format, dst->data_type, &before_img, NULL);
+            bm_image_alloc_dev_mem(before_img, BMCV_HEAP1_ID);
+            ret = (int)bmcv_image_vpp_csc_matrix_convert(handle, 1, src, &before_img, csc_type, NULL, BMCV_INTER_LINEAR, loca);
+            if(ret != 0) {
+                bm_image_destroy(before_img);
+                av_log(NULL, AV_LOG_ERROR, "bmvpp_scale bilinear_ffmpeg phase_1 fail\n");
+                return ret;
+            }
+            ret = (int)bmcv_image_vpp_convert_padding(handle, 1, before_img, dst, &padding_attr, NULL, BMCV_INTER_LINEAR);
+            bm_image_destroy(before_img);
+            return ret;
+        }
+    }
     ret = (int)bmcv_image_vpp_basic(handle, 1, &src, dst, &num, loca, &padding_attr, resize_method, csc_type, NULL);
     return ret;
 }
@@ -230,7 +253,6 @@ typedef struct BmScaleContext {
     int is_bmvpp_inited;
     int zero_copy;
     int stride_align;
-    pthread_rwlock_t list_rwlock;
     struct list_head freed_avbuffer_list;
     struct list_head module_entry;
 
@@ -423,9 +445,7 @@ static void bmscale_avbuffer_recycle(void *ctx, uint8_t *data)
 
     //recycle it, not really free.
     if (found) {
-        pthread_rwlock_wrlock(&avbuffer_ctx->ctx->list_rwlock);
         list_add(&avbuffer_ctx->entry, &avbuffer_ctx->ctx->freed_avbuffer_list);
-        pthread_rwlock_unlock(&avbuffer_ctx->ctx->list_rwlock);
     }else{
         avbuffer_ctx->ctx = NULL;
         bmscale_avbuffer_release(avbuffer_ctx);
@@ -463,20 +483,16 @@ static struct bmscale_avbuffer_ctx_s* bmscale_buffer_pool_alloc(BmScaleContext *
     int total_buffer_size = 0;
     bm_handle_t handle;
 
-    pthread_rwlock_rdlock(&ctx->list_rwlock);
     list_for_each_entry(hwpic, &ctx->freed_avbuffer_list, entry, struct bmscale_avbuffer_ctx_s) {
         if (hwpic->format == format && hwpic->width == width && hwpic->height == height) {
             found = 1;
             break;
         }
     }
-    pthread_rwlock_unlock(&ctx->list_rwlock);
 
     if (found) {
         // detach from free chain list.
-        pthread_rwlock_wrlock(&ctx->list_rwlock);
         list_del(&hwpic->entry);
-        pthread_rwlock_unlock(&ctx->list_rwlock);
         return hwpic;
     }
 
@@ -647,7 +663,6 @@ static int bmscale_init(AVFilterContext *ctx)
 
     s->is_bmvpp_inited = 0;
     list_init(&s->freed_avbuffer_list);
-    pthread_rwlock_init(&s->list_rwlock, NULL);
     // qsort(g_convert_table, FF_ARRAY_ELEMS(g_convert_table), sizeof(g_convert_table[0]), bmscale_csc_table_key_compare);
 
     list_init(&s->module_entry);
@@ -699,13 +714,10 @@ static void bmscale_uninit(AVFilterContext *ctx)
 
     {
         struct bmscale_avbuffer_ctx_s *pos, *n;
-        pthread_rwlock_wrlock(&s->list_rwlock);
         list_for_each_entry_safe(pos, n, &s->freed_avbuffer_list, entry, struct bmscale_avbuffer_ctx_s) {
             bmscale_avbuffer_release(pos);
         }
-        pthread_rwlock_unlock(&s->list_rwlock);
     }
-    pthread_rwlock_destroy(&s->list_rwlock);
 
     av_frame_free(&s->frame);
     av_frame_free(&s->tmp_frame);
@@ -1115,6 +1127,11 @@ static int bmscale_config_props_hwaccel(AVFilterLink *outlink)
     else
         outlink->sample_aspect_ratio = inlink->sample_aspect_ratio;
 
+    // if padding enable, keeping sar unchanged
+    if (s->opt == BMSCALE_OPT_PAD) {
+        outlink->sample_aspect_ratio = inlink->sample_aspect_ratio;
+    }
+
     outlink->w = out_w;
     outlink->h = out_h;
 
@@ -1194,6 +1211,11 @@ static int bmscale_config_props(AVFilterLink *outlink)
                 inlink->sample_aspect_ratio);
     else
         outlink->sample_aspect_ratio = inlink->sample_aspect_ratio;
+
+    // if padding enable, keeping sar unchanged
+    if (s->opt == BMSCALE_OPT_PAD) {
+        outlink->sample_aspect_ratio = inlink->sample_aspect_ratio;
+    }
 
     outlink->w = out_w;
     outlink->h = out_h;
@@ -2139,10 +2161,11 @@ static const AVOption bmscale_options[] = {
         { "opt", "resize operation", OFFSET(opt), AV_OPT_TYPE_INT,   { .i64 = BMSCALE_OPT_SCALE }, 0, 2, FLAGS, "opt" },
         { "crop",    "auto cropping",      0, AV_OPT_TYPE_CONST, { .i64 = BMSCALE_OPT_CROP  }, 0, 0, FLAGS, "opt" },
         { "pad",     "auto padding",       0, AV_OPT_TYPE_CONST, { .i64 = BMSCALE_OPT_PAD   }, 0, 0, FLAGS, "opt" },
-        { "flags", "resize method", OFFSET(flags), AV_OPT_TYPE_INT,  { .i64 = BMCV_INTER_LINEAR  }, 0, 2, FLAGS, "flags" },
+        { "flags", "resize method", OFFSET(flags), AV_OPT_TYPE_INT,  { .i64 = BMCV_INTER_LINEAR  }, 0, 3, FLAGS, "flags" },
         { "bilinear","bilinear method",    0, AV_OPT_TYPE_CONST, { .i64 = BMCV_INTER_LINEAR }, 0, 0, FLAGS, "flags" },
         { "nearest", "nearest method",     0, AV_OPT_TYPE_CONST, { .i64 = BMCV_INTER_NEAREST  }, 0, 0, FLAGS, "flags" },
         { "bicubic", "bicubic method",     0, AV_OPT_TYPE_CONST, { .i64 = BMCV_INTER_BICUBIC  }, 0, 0, FLAGS, "flags" },
+        { "bilinear_ffmpeg", "bilinear_ffmpeg method", 0, AV_OPT_TYPE_CONST, { .i64 = BMCV_INTER_LINEAR_FFMPEG  }, 0, 0, FLAGS, "flags" },
         { "sophon_idx", "sophon device index when running in pcie mode", OFFSET(soc_idx), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 256, FLAGS },
         { "zero_copy", "flag to indicate if the output frame buffer only has physical buffer",
                 OFFSET(zero_copy), AV_OPT_TYPE_FLAGS, {.i64 = 0}, 0, 1, FLAGS },

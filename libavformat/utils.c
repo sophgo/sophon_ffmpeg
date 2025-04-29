@@ -534,47 +534,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
     return 0;
 }
 
-static void set_inst_info_to_vpu(AVFormatContext *s, unsigned long st)
-{
-    FILE *fp = NULL;
-#ifdef BM_PCIE_MODE
-    char vpu_name[] = "/proc/vpuinfo";
-    char vpuinfo_name[32] = {0};
-    int vpuinfo_idx = -1;
-    AVDictionaryEntry *e;
-
-    e = av_dict_get(s->metadata, "sophon_idx", NULL, 0);
-    if (!e) {
-        e = av_dict_get(s->metadata, "pcie_board_id", NULL, 0);
-    }
-    if (e) {
-        vpuinfo_idx = atoi(e->value);
-    }
-    if (vpuinfo_idx < 0)
-        return;
-
-    sprintf(vpuinfo_name, "%s%d", vpu_name, vpuinfo_idx);
-    fp = fopen(vpuinfo_name, "w");
-#else
-    fp = fopen("/proc/vpuinfo", "w");
-#endif
-
-    if (fp == NULL) {
-        av_log(s, AV_LOG_ERROR, "can not open /proc/vpuinfo.\n");
-        return;
-    }
-
-    {
-        char *p_str = av_asprintf("%ld %ld %ld, %s", (unsigned long)s, av_gettime(), st, s->url);
-        int str_len = strlen(p_str);
-        if(fwrite(p_str, 1, str_len, fp) != str_len){
-            av_log(s, AV_LOG_ERROR, "can not write /proc/vpuinfo.\n");
-        }
-        av_free(p_str);
-        fclose(fp);
-    }
-}
-
 int avformat_open_input(AVFormatContext **ps, const char *filename,
                         AVInputFormat *fmt, AVDictionary **options)
 {
@@ -717,7 +676,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
         *options = tmp;
     }
     *ps = s;
-    set_inst_info_to_vpu(s, 0);
     return 0;
 
 fail:
@@ -1913,7 +1871,6 @@ return_packet:
     return ret;
 
 return_error:
-    set_inst_info_to_vpu(s, 1);
     return ret;
 }
 
@@ -4499,7 +4456,6 @@ void avformat_close_input(AVFormatContext **ps)
     if (s->iformat)
         if (s->iformat->read_close)
             s->iformat->read_close(s);
-    set_inst_info_to_vpu(s, 1);
     avformat_free_context(s);
 
     *ps = NULL;
